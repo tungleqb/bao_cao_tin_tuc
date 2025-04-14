@@ -1,2 +1,2 @@
-cd ~/tramproxy2
-git pull origin master
+cd ~/bao_cao_tin_tuc
+git pull origin main

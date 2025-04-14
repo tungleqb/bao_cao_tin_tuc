@@ -1,9 +1,11 @@
-roadmap_files/
-├── roadmap_tongthe.md
-├── roadmap_auth.md
-├── roadmap_baocao.md
-├── roadmap_frontend.md
-├── roadmap_admin.md
-├── roadmap_export_excel.md
-├── roadmap_scheduler.md
-└── roadmap_deploy.md
+# Hướng dẫn khởi chạy frontend
+
+## Yêu cầu:
+- NodeJS >= 16
+- npm hoặc yarn
+
+## Cài đặt & chạy:
+npm install
+npm run dev
+
+Truy cập: http://localhost:5173
