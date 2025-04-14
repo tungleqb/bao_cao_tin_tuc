@@ -1,0 +1,50 @@
+# ====================
+# PYTHON - BACKEND
+# ====================
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.log
+*.env
+*.env.*
+*.db
+*.bak
+*.swp
+*.tmp
+
+# VS Code settings
+.vscode/
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Static reports
+backend/app/static/reports/
+
+# ====================
+# NODEJS - FRONTEND
+# ====================
+node_modules/
+dist/
+build/
+*.log
+
+# dotenv files
+frontend/.env
+frontend/.env.local
+frontend/.env.development
+frontend/.env.production
+
+# Vite cache
+frontend/.vite/
+
+# ====================
+# SYSTEM FILES
+# ====================
+.DS_Store
+Thumbs.db
+*.zip
+*.tar.gz
+*.rar
