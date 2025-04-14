@@ -22,4 +22,4 @@ def dump_all_files(root_dir_list: str, output_file: str):
                     out.write("\n")
 
 if __name__ == "__main__":
-    dump_all_files(["app", "tests"], "project_dump.txt")
+    dump_all_files(["backend", "frontend"], "project_dump.txt")

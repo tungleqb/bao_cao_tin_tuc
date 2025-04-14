@@ -1,4 +1,5 @@
 # Bước 1: Tạo môi trường ảo
+cd backend
 python -m venv venv
 
 # Bước 2: Kích hoạt môi trường ảo
