@@ -1,9 +1,11 @@
-import os
 from pydantic import BaseSettings
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "postgresql+asyncpg://user:password@localhost/dbname"
-    SECRET_KEY: str = "your_secret_key"
+    DATABASE_URL: str
+    SECRET_KEY: str
     ALGORITHM: str = "HS256"
+
+    class Config:
+        env_file = ".env"
 
 settings = Settings()

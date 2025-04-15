@@ -43,3 +43,34 @@ npm run dev
 
 Truy cập: http://localhost:5173
 
+
+ Kế hoạch chuyển đổi sang PostgreSQL:
+🔧 Bước 1: Cấu hình kết nối và khởi tạo database
+Sử dụng config.py với DATABASE_URL
+
+Tạo engine + session (SQLAlchemy async)
+
+🗃️ Bước 2: Tạo bảng User trong models/user.py (đã có)
+Bao gồm: id, username, hashed_password, ten_chi_nhanh, is_admin
+
+💾 Bước 3: Tạo file database.py để quản lý session
+Tạo SessionLocal, Base, get_db()
+
+🔁 Bước 4: Sửa auth.py:
+Thay fake_users_db bằng thao tác thật trên database (dùng session)
+
+🧪 Bước 5: Khởi tạo bảng (nếu chưa có)
+Chạy Base.metadata.create_all(bind=engine) (hoặc migrate sau này)
+
+✅ Hướng dẫn chạy:
+1. Tạo PostgreSQL và database thực (nếu chưa có):
+sudo service postgresql start
+sudo -u postgres psql
+CREATE DATABASE baocao;
+CREATE USER user WITH PASSWORD 'password';
+GRANT ALL PRIVILEGES ON DATABASE baocao TO user;
+2. Sửa .env hoặc config.py:
+DATABASE_URL = "postgresql+asyncpg://user:password@localhost/baocao"
+3. Cài thư viện và chạy:
+pip install -r requirements.txt
+PYTHONPATH=. uvicorn app.main:app --reload

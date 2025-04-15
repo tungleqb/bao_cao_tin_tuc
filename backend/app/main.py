@@ -1,9 +1,10 @@
 from fastapi import FastAPI
-from .routers import auth
 from fastapi.middleware.cors import CORSMiddleware
+from .routers import auth
+from .database import engine, Base
 
 app = FastAPI()
-# 👇 Thêm đoạn này
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
@@ -11,7 +12,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
+
+@app.on_event("startup")
+async def on_startup():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 @app.get("/ping")
 async def ping():
