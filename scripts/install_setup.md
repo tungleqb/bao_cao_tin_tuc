@@ -62,13 +62,16 @@ Thay fake_users_db bằng thao tác thật trên database (dùng session)
 🧪 Bước 5: Khởi tạo bảng (nếu chưa có)
 Chạy Base.metadata.create_all(bind=engine) (hoặc migrate sau này)
 
+sudo apt install postgresql postgresql-contrib -y
+
 ✅ Hướng dẫn chạy:
 1. Tạo PostgreSQL và database thực (nếu chưa có):
 sudo service postgresql start
 sudo -u postgres psql
 CREATE DATABASE baocao;
-CREATE USER user WITH PASSWORD 'password';
-GRANT ALL PRIVILEGES ON DATABASE baocao TO user;
+CREATE USER report_user WITH PASSWORD 'password';
+GRANT ALL PRIVILEGES ON DATABASE baocao TO report_user;
+\q
 2. Sửa .env hoặc config.py:
 DATABASE_URL = "postgresql+asyncpg://user:password@localhost/baocao"
 3. Cài thư viện và chạy:

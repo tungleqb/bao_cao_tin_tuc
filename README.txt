@@ -5,6 +5,7 @@
 - npm hoặc yarn
 
 ## Cài đặt & chạy:
+cd frontend
 npm install
 npm run dev
 
