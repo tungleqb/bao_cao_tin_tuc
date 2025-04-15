@@ -1,10 +1,11 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from ..config import settings
 from jose import JWTError, jwt
 from ..schemas.user import UserOut
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
-SECRET_KEY = "your-secret-key"
+SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = "HS256"
 
 def get_current_user(token: str = Depends(oauth2_scheme)) -> UserOut:
