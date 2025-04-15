@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import auth
+from .routers import auth, user
 from .database import engine, Base
 
 app = FastAPI()
@@ -14,6 +14,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
+app.include_router(user.router, prefix="/admin/user", tags=["Admin User"])
 
 @app.on_event("startup")
 async def on_startup():
@@ -23,3 +24,6 @@ async def on_startup():
 @app.get("/ping")
 async def ping():
     return {"msg": "pong"}
+
+
+

@@ -1,4 +1,8 @@
 
+===== FILE: backend/.env =====
+DATABASE_URL=postgresql+asyncpg://user:password@localhost/baocao
+SECRET_KEY=Tori@@123!!
+
 ===== FILE: backend/requirements.txt =====
 fastapi
 uvicorn[standard]
@@ -8,7 +12,9 @@ python-jose
 passlib
 bcrypt==3.2.0
 pydantic
+pydantic-settings
 python-multipart
+
 
 ===== FILE: backend/run_test_ping.sh =====
 #!/bin/bash
@@ -17,24 +23,57 @@ uvicorn backend.app.main:app --reload
 
 
 ===== FILE: backend/app\config.py =====
-import os
-from pydantic import BaseSettings
+from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "postgresql+asyncpg://user:password@localhost/dbname"
-    SECRET_KEY: str = "your_secret_key"
+    DATABASE_URL: str
+    SECRET_KEY: str
     ALGORITHM: str = "HS256"
 
+    class Config:
+        env_file = ".env"
+
 settings = Settings()
+
+===== FILE: backend/app\database.py =====
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from .config import settings
+
+DATABASE_URL = settings.DATABASE_URL
+
+engine = create_async_engine(DATABASE_URL, echo=True)
+SessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+Base = declarative_base()
+
+async def get_db():
+    async with SessionLocal() as session:
+        yield session
 
 
 ===== FILE: backend/app\main.py =====
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from .routers import auth
+from .database import engine, Base
 
 app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
+
+@app.on_event("startup")
+async def on_startup():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 @app.get("/ping")
 async def ping():
@@ -69,51 +108,53 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> UserOut:
 
 ===== FILE: backend/app\models\user.py =====
 from sqlalchemy import Column, Integer, String, Boolean
-from sqlalchemy.ext.declarative import declarative_base
-
-Base = declarative_base()
+from ..database import Base
 
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True)
-    hashed_password = Column(String)
-    ten_chi_nhanh = Column(String)
+    username = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    ten_chi_nhanh = Column(String, nullable=True)
     is_admin = Column(Boolean, default=False)
 
 
 ===== FILE: backend/app\routers\auth.py =====
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
-from ..schemas.user import UserCreate, UserLogin, UserOut
-from ..services.auth import create_access_token, get_password_hash, verify_password
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..schemas.user import UserCreate, UserOut
+from ..models.user import User
+from ..services.auth import get_password_hash, verify_password, create_access_token, get_user_by_username
+from ..database import get_db
 
 router = APIRouter()
 
-fake_users_db = {}
-
 @router.post("/register", response_model=UserOut)
-def register(user: UserCreate):
-    if user.username in fake_users_db:
+async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
+    existing_user = await get_user_by_username(db, user.username)
+    if existing_user:
         raise HTTPException(status_code=400, detail="Username already registered")
-    hashed_password = get_password_hash(user.password)
-    user_data = {
-        "id": len(fake_users_db) + 1,
-        "username": user.username,
-        "ten_chi_nhanh": user.ten_chi_nhanh,
-        "hashed_password": hashed_password,
-        "is_admin": user.is_admin
-    }
-    fake_users_db[user.username] = user_data
-    return UserOut(**user_data)
+    hashed_pw = get_password_hash(user.password)
+    new_user = User(
+        username=user.username,
+        hashed_password=hashed_pw,
+        ten_chi_nhanh=user.ten_chi_nhanh,
+        is_admin=user.is_admin
+    )
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
+    return new_user
 
 @router.post("/login")
-def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = fake_users_db.get(form_data.username)
-    if not user or not verify_password(form_data.password, user["hashed_password"]):
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+    user = await get_user_by_username(db, form_data.username)
+    if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    token = create_access_token(data={"sub": user["username"]})
+    token = create_access_token(data={"sub": user.username})
     return {"access_token": token, "token_type": "bearer"}
 
 
@@ -137,16 +178,22 @@ class UserOut(BaseModel):
     is_admin: bool
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 ===== FILE: backend/app\services\auth.py =====
 from passlib.context import CryptContext
-from datetime import datetime, timedelta
-from jose import JWTError, jwt
+from datetime import datetime, timedelta, timezone
+from jose import jwt
+from ..config import settings
 
-SECRET_KEY = "your-secret-key"
-ALGORITHM = "HS256"
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+
+from ..models.user import User
+
+SECRET_KEY = settings.SECRET_KEY
+ALGORITHM = settings.ALGORITHM
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -159,10 +206,14 @@ def get_password_hash(password):
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=15))
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+async def get_user_by_username(db: AsyncSession, username: str):
+    result = await db.execute(select(User).filter(User.username == username))
+    return result.scalar_one_or_none()
 
 
 ===== FILE: frontend/index.html =====

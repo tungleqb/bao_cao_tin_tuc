@@ -21,3 +21,12 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> UserOut:
         return UserOut(id=1, username=username, ten_chi_nhanh="Test", is_admin=False)
     except JWTError:
         raise credentials_exception
+
+def get_current_admin(token: str = Depends(oauth2_scheme)) -> UserOut:
+    user = get_current_user(token)
+    if not user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Không có quyền truy cập"
+        )
+    return user
