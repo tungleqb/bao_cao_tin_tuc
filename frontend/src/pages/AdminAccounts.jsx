@@ -4,7 +4,12 @@ import { fetchUsers, createUser, updateUser, deleteUser } from "../services/user
 
 function AdminAccounts() {
   const [users, setUsers] = useState([]);
-  const [form, setForm] = useState({ username: "", password: "", ten_chi_nhanh: "", is_admin: false });
+  const [form, setForm] = useState({
+    username: "",
+    password: "",
+    ten_chi_nhanh: "",
+    is_admin: false
+  });
   const [editId, setEditId] = useState(null);
   const [error, setError] = useState("");
 
@@ -51,11 +56,34 @@ function AdminAccounts() {
       <h2 className="text-xl font-bold mb-4">Quản lý tài khoản chi nhánh</h2>
       {error && <p className="text-red-500">{error}</p>}
       <form onSubmit={handleSubmit} className="mb-4 space-y-2">
-        <input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="Username" className="border px-2 py-1" required />
-        <input value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Password" type="password" className="border px-2 py-1" required />
-        <input value={form.ten_chi_nhanh} onChange={(e) => setForm({ ...form, ten_chi_nhanh: e.target.value })} placeholder="Tên chi nhánh" className="border px-2 py-1" />
+        <input
+          value={form.username || ""}
+          onChange={(e) => setForm({ ...form, username: e.target.value })}
+          placeholder="Username"
+          className="border px-2 py-1"
+          required
+        />
+        <input
+          value={form.password || ""}
+          onChange={(e) => setForm({ ...form, password: e.target.value })}
+          placeholder="Password"
+          type="password"
+          className="border px-2 py-1"
+          required
+        />
+        <input
+          value={form.ten_chi_nhanh || ""}
+          onChange={(e) => setForm({ ...form, ten_chi_nhanh: e.target.value })}
+          placeholder="Tên chi nhánh"
+          className="border px-2 py-1"
+        />
         <label className="inline-flex items-center">
-          <input type="checkbox" checked={form.is_admin} onChange={(e) => setForm({ ...form, is_admin: e.target.checked })} className="mr-1" />
+          <input
+            type="checkbox"
+            checked={form.is_admin}
+            onChange={(e) => setForm({ ...form, is_admin: e.target.checked })}
+            className="mr-1"
+          />
           Admin?
         </label>
         <button type="submit" className="bg-blue-600 text-white px-4 py-1 rounded">
@@ -76,8 +104,26 @@ function AdminAccounts() {
               <td>{user.ten_chi_nhanh}</td>
               <td>{user.is_admin ? "✔" : ""}</td>
               <td>
-                <button onClick={() => { setForm(user); setEditId(user.id); }} className="text-blue-600 mr-2">Sửa</button>
-                <button onClick={() => handleDelete(user.id)} className="text-red-600">Xoá</button>
+                <button
+                  onClick={() => {
+                    setForm({
+                      username: user.username || "",
+                      password: "",
+                      ten_chi_nhanh: user.ten_chi_nhanh || "",
+                      is_admin: user.is_admin || false
+                    });
+                    setEditId(user.id);
+                  }}
+                  className="text-blue-600 mr-2"
+                >
+                  Sửa
+                </button>
+                <button
+                  onClick={() => handleDelete(user.id)}
+                  className="text-red-600"
+                >
+                  Xoá
+                </button>
               </td>
             </tr>
           ))}
