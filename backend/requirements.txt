@@ -10,3 +10,4 @@ pydantic-settings
 python-multipart
 unidecode
 alembic
+psycopg2-binary
