@@ -31,7 +31,7 @@ async def upload_report(
 
     ext = file.filename.split(".")[-1]
     filename_raw = f"{user.ten_chi_nhanh}_{loai.ten_loai}_{now.strftime('%Y-%m-%d_%H-%M-%S')}.{ext}"
-    filename = unidecode(raw_name).replace(" ", "_")
+    filename = unidecode(filename_raw).replace(" ", "_")
     base_dir = Path("static/reports") / loai.ten_loai / now.strftime("%Y-%m-%d")
     if loai.ten_loai.lower() == "báo cáo ngày":
         base_dir = base_dir / ("co_su_kien" if has_event else "khong_su_kien")
