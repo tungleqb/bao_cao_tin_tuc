@@ -3,6 +3,45 @@
 DATABASE_URL=postgresql+asyncpg://user:password@localhost/baocao
 SECRET_KEY=Tori@@123!!
 
+===== FILE: backend/alembic.ini =====
+[alembic]
+script_location = alembic
+sqlalchemy.url = postgresql+asyncpg://user:password@localhost/baocao
+
+[loggers]
+keys = root,sqlalchemy,alembic
+
+[handlers]
+keys = console
+
+[formatters]
+keys = generic
+
+[logger_root]
+level = WARN
+handlers = console
+qualname =
+
+[logger_sqlalchemy]
+level = WARN
+handlers =
+qualname = sqlalchemy.engine
+
+[logger_alembic]
+level = INFO
+handlers =
+qualname = alembic
+
+[handler_console]
+class = StreamHandler
+args = (sys.stderr,)
+level = NOTSET
+formatter = generic
+
+[formatter_generic]
+format = %(levelname)-5.5s [%(name)s] %(message)s
+datefmt = %H:%M:%S
+
 ===== FILE: backend/requirements.txt =====
 fastapi
 uvicorn[standard]
@@ -14,6 +53,9 @@ bcrypt==3.2.0
 pydantic
 pydantic-settings
 python-multipart
+unidecode
+alembic
+psycopg2-binary
 
 
 ===== FILE: backend/run_test_ping.sh =====
@@ -21,6 +63,81 @@ python-multipart
 echo "Running FastAPI server at http://127.0.0.1:8000"
 uvicorn backend.app.main:app --reload
 
+
+===== FILE: backend/alembic\env.py =====
+from logging.config import fileConfig
+from sqlalchemy import pool
+from alembic import context
+from app.models import user, loai_baocao, report  # Import models
+from app.database import Base
+from app.config import settings
+
+config = context.config
+fileConfig(config.config_file_name)
+target_metadata = Base.metadata
+
+def run_migrations_offline():
+    context.configure(
+        url=settings.DATABASE_URL,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+def run_migrations_online():
+    from sqlalchemy import create_engine
+
+    connectable = create_engine(settings.DATABASE_URL.replace("asyncpg", "psycopg2"))
+
+    with connectable.connect() as connection:
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+
+===== FILE: backend/alembic\script.py.mako =====
+
+
+===== FILE: backend/alembic\versions\20250416_152221_create_loai_baocao.py =====
+"""create loai_baocao
+
+Revision ID: 20250416_152221
+Revises: 
+Create Date: 2025-04-16 15:22:21
+
+"""
+
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision = '20250416_152221'
+down_revision = None
+branch_labels = None
+depends_on = None
+
+
+def upgrade():
+    op.create_table(
+        'loai_baocao',
+        sa.Column('id', sa.Integer(), primary_key=True),
+        sa.Column('ten_loai', sa.String(), nullable=False),
+        sa.Column('thoi_gian_bat_dau', sa.DateTime(), nullable=False),
+        sa.Column('han_gui', sa.DateTime(), nullable=False),
+        sa.Column('dinh_ky', sa.Integer(), nullable=False, server_default='0'),
+    )
+
+
+def downgrade():
+    op.drop_table('loai_baocao')
 
 ===== FILE: backend/app\config.py =====
 from pydantic_settings import BaseSettings
@@ -55,8 +172,10 @@ async def get_db():
 ===== FILE: backend/app\main.py =====
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import auth
+from .routers import auth, user
 from .database import engine, Base
+from .routers import report
+from .routers import loai_baocao
 
 app = FastAPI()
 
@@ -69,6 +188,9 @@ app.add_middleware(
 )
 
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
+app.include_router(user.router, prefix="/admin/user", tags=["Admin User"])
+app.include_router(report.router, prefix="/report", tags=["Report"])
+app.include_router(loai_baocao.router, prefix="/admin/loaibaocao", tags=["Loại báo cáo"])
 
 @app.on_event("startup")
 async def on_startup():
@@ -80,17 +202,24 @@ async def ping():
     return {"msg": "pong"}
 
 
+
+
+
 ===== FILE: backend/app\dependencies\auth.py =====
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from ..config import settings
 from jose import JWTError, jwt
 from ..schemas.user import UserOut
+from ..database import get_db
+from ..services.auth import get_user_by_username
+from sqlalchemy.ext.asyncio import AsyncSession
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
-SECRET_KEY = "your-secret-key"
+SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = "HS256"
 
-def get_current_user(token: str = Depends(oauth2_scheme)) -> UserOut:
+async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> UserOut:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -101,9 +230,53 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> UserOut:
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception
-        return UserOut(id=1, username=username, ten_chi_nhanh="Test", is_admin=False)
+        db_user = await get_user_by_username(db, username)
+        if db_user is None:
+            raise credentials_exception
+        return UserOut.model_validate(db_user)
     except JWTError:
         raise credentials_exception
+
+async def get_current_admin(user: UserOut = Depends(get_current_user)):
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Không có quyền truy cập")
+    return user
+
+
+===== FILE: backend/app\models\loai_baocao.py =====
+
+from sqlalchemy import Column, Integer, String, DateTime
+from ..database import Base
+
+class LoaiBaoCao(Base):
+    __tablename__ = "loai_baocao"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ten_loai = Column(String, nullable=False)
+    from sqlalchemy import DateTime
+    thoi_gian_bat_dau = Column(DateTime(timezone=True), nullable=False)
+    han_gui = Column(DateTime(timezone=True), nullable=False)
+    dinh_ky = Column(Integer, default=0)  # đơn vị giờ/ngày/tuần...
+
+
+===== FILE: backend/app\models\report.py =====
+
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime
+from sqlalchemy.sql import func
+from ..database import Base
+
+class Report(Base):
+    __tablename__ = "reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    loai_baocao_id = Column(Integer, ForeignKey("loai_baocao.id"))
+    user_id = Column(Integer, ForeignKey("users.id"))
+    filename = Column(String)
+    filesize = Column(Integer)
+    has_event = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_late = Column(Boolean, default=False)
+    late_seconds = Column(Integer, default=0)
 
 
 ===== FILE: backend/app\models\user.py =====
@@ -156,6 +329,211 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
         raise HTTPException(status_code=401, detail="Invalid credentials")
     token = create_access_token(data={"sub": user.username})
     return {"access_token": token, "token_type": "bearer"}
+
+
+===== FILE: backend/app\routers\loai_baocao.py =====
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+
+from ..schemas.loai_baocao import LoaiBaoCaoCreate, LoaiBaoCaoOut
+from ..models.loai_baocao import LoaiBaoCao
+from ..dependencies.auth import get_current_admin
+from ..database import get_db
+
+router = APIRouter()
+
+@router.get("/", response_model=list[LoaiBaoCaoOut])
+async def get_all(db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    result = await db.execute(select(LoaiBaoCao))
+    return result.scalars().all()
+
+@router.post("/", response_model=LoaiBaoCaoOut)
+async def create(item: LoaiBaoCaoCreate, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    obj = LoaiBaoCao(**item.dict())
+    db.add(obj)
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+@router.put("/{id}", response_model=LoaiBaoCaoOut)
+async def update(id: int, item: LoaiBaoCaoCreate, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    result = await db.execute(select(LoaiBaoCao).where(LoaiBaoCao.id == id))
+    obj = result.scalar_one_or_none()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Không tìm thấy")
+    for k, v in item.dict().items():
+        setattr(obj, k, v)
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+@router.delete("/{id}")
+async def delete(id: int, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    result = await db.execute(select(LoaiBaoCao).where(LoaiBaoCao.id == id))
+    obj = result.scalar_one_or_none()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Không tìm thấy")
+    await db.delete(obj)
+    await db.commit()
+    return {"msg": "Đã xoá"}
+
+
+===== FILE: backend/app\routers\report.py =====
+
+from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from ..database import get_db
+from ..models.report import Report
+from ..models.loai_baocao import LoaiBaoCao
+from ..schemas.report import ReportOut
+from ..dependencies.auth import get_current_user
+from datetime import datetime
+import os
+from pathlib import Path
+from unidecode import unidecode
+
+router = APIRouter()
+
+@router.post("/upload", response_model=ReportOut)
+async def upload_report(
+    file: UploadFile = File(...),
+    loai_baocao_id: int = Form(...),
+    has_event: bool = Form(True),
+    db: AsyncSession = Depends(get_db),
+    user = Depends(get_current_user)
+):
+    loai = await db.get(LoaiBaoCao, loai_baocao_id)
+    if not loai:
+        raise HTTPException(status_code=404, detail="Loại báo cáo không tồn tại")
+
+    now = datetime.now()
+    is_late = now > loai.han_gui
+    late_seconds = int((now - loai.han_gui).total_seconds()) if is_late else 0
+
+    ext = file.filename.split(".")[-1]
+    filename_raw = f"{user.ten_chi_nhanh}_{loai.ten_loai}_{now.strftime('%Y-%m-%d_%H-%M-%S')}.{ext}"
+    filename = unidecode(filename_raw).replace(" ", "_")
+    base_dir = Path("static/reports") / unidecode(loai.ten_loai).replace(" ", "_") / now.strftime("%Y-%m-%d")
+    if loai.ten_loai.lower() == "báo cáo ngày":
+        base_dir = base_dir / ("co_su_kien" if has_event else "khong_su_kien")
+    os.makedirs(base_dir, exist_ok=True)
+
+    path = base_dir / filename
+    content = await file.read()
+    with open(path, "wb") as f:
+        f.write(content)
+
+    new_report = Report(
+        loai_baocao_id=loai_baocao_id,
+        user_id=user.id,
+        filename=str(filename),
+        filesize=len(content),
+        has_event=has_event,
+        is_late=is_late,
+        late_seconds=late_seconds
+    )
+    db.add(new_report)
+    await db.commit()
+    await db.refresh(new_report)
+    return new_report
+
+
+===== FILE: backend/app\routers\user.py =====
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from ..schemas.user import UserCreate, UserOut
+from ..models.user import User
+from ..services.auth import get_user_by_username, get_password_hash
+from ..database import get_db
+from ..dependencies.auth import get_current_admin
+from sqlalchemy.future import select
+
+router = APIRouter()
+
+@router.get("/", response_model=list[UserOut])
+async def list_users(db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    result = await db.execute(select(User))
+    return result.scalars().all()
+
+@router.post("/", response_model=UserOut)
+async def create_user(user: UserCreate, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    if await get_user_by_username(db, user.username):
+        raise HTTPException(status_code=400, detail="Username đã tồn tại")
+    new_user = User(
+        username=user.username,
+        hashed_password=get_password_hash(user.password),
+        ten_chi_nhanh=user.ten_chi_nhanh,
+        is_admin=user.is_admin
+    )
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
+    return new_user
+
+@router.put("/{user_id}", response_model=UserOut)
+async def update_user(user_id: int, user: UserCreate, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    result = await db.execute(select(User).where(User.id == user_id))
+    db_user = result.scalar_one_or_none()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User không tồn tại")
+    db_user.username = user.username
+    db_user.hashed_password = get_password_hash(user.password)
+    db_user.ten_chi_nhanh = user.ten_chi_nhanh
+    db_user.is_admin = user.is_admin
+    await db.commit()
+    await db.refresh(db_user)
+    return db_user
+
+@router.delete("/{user_id}")
+async def delete_user(user_id: int, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    result = await db.execute(select(User).where(User.id == user_id))
+    db_user = result.scalar_one_or_none()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User không tồn tại")
+    await db.delete(db_user)
+    await db.commit()
+    return {"msg": "Đã xoá tài khoản thành công"}
+
+
+===== FILE: backend/app\schemas\loai_baocao.py =====
+
+from pydantic import BaseModel
+from datetime import datetime
+
+class LoaiBaoCaoBase(BaseModel):
+    ten_loai: str
+    thoi_gian_bat_dau: datetime
+    han_gui: datetime
+    dinh_ky: int = 0
+
+class LoaiBaoCaoCreate(LoaiBaoCaoBase):
+    pass
+
+class LoaiBaoCaoOut(LoaiBaoCaoBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+===== FILE: backend/app\schemas\report.py =====
+
+from pydantic import BaseModel
+from datetime import datetime
+
+class ReportOut(BaseModel):
+    id: int
+    filename: str
+    filesize: int
+    created_at: datetime
+    is_late: bool
+    late_seconds: int
+    has_event: bool
+
+    class Config:
+        from_attributes = True
 
 
 ===== FILE: backend/app\schemas\user.py =====
@@ -301,6 +679,145 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 ===== FILE: frontend/src\router.jsx =====
 
 
+===== FILE: frontend/src\pages\AdminAccounts.jsx =====
+
+import React, { useEffect, useState } from "react";
+import { fetchUsers, createUser, updateUser, deleteUser } from "../services/userService";
+
+function AdminAccounts() {
+  const [users, setUsers] = useState([]);
+  const [form, setForm] = useState({
+    username: "",
+    password: "",
+    ten_chi_nhanh: "",
+    is_admin: false
+  });
+  const [editId, setEditId] = useState(null);
+  const [error, setError] = useState("");
+
+  const token = localStorage.getItem("token");
+
+  useEffect(() => {
+    loadUsers();
+  }, []);
+
+  const loadUsers = async () => {
+    try {
+      const res = await fetchUsers(token);
+      setUsers(res.data);
+    } catch (err) {
+      setError("Không thể tải danh sách người dùng.");
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      if (editId) {
+        await updateUser(editId, form, token);
+      } else {
+        await createUser(form, token);
+      }
+      setForm({ username: "", password: "", ten_chi_nhanh: "", is_admin: false });
+      setEditId(null);
+      loadUsers();
+    } catch (err) {
+      setError("Lỗi khi lưu tài khoản.");
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (window.confirm("Xoá tài khoản này?")) {
+      await deleteUser(id, token);
+      loadUsers();
+    }
+  };
+
+  return (
+    <div className="p-4">
+      <h2 className="text-xl font-bold mb-4">Quản lý tài khoản chi nhánh</h2>
+      {error && <p className="text-red-500">{error}</p>}
+      <form onSubmit={handleSubmit} className="mb-4 space-y-2">
+        <input
+          value={form.username || ""}
+          onChange={(e) => setForm({ ...form, username: e.target.value })}
+          placeholder="Username"
+          className="border px-2 py-1"
+          required
+        />
+        <input
+          value={form.password || ""}
+          onChange={(e) => setForm({ ...form, password: e.target.value })}
+          placeholder="Password"
+          type="password"
+          className="border px-2 py-1"
+          required
+        />
+        <input
+          value={form.ten_chi_nhanh || ""}
+          onChange={(e) => setForm({ ...form, ten_chi_nhanh: e.target.value })}
+          placeholder="Tên chi nhánh"
+          className="border px-2 py-1"
+        />
+        <label className="inline-flex items-center">
+          <input
+            type="checkbox"
+            checked={form.is_admin}
+            onChange={(e) => setForm({ ...form, is_admin: e.target.checked })}
+            className="mr-1"
+          />
+          Admin?
+        </label>
+        <button type="submit" className="bg-blue-600 text-white px-4 py-1 rounded">
+          {editId ? "Cập nhật" : "Tạo mới"}
+        </button>
+      </form>
+      <table className="w-full table-auto border">
+        <thead>
+          <tr className="bg-gray-200">
+            <th>ID</th><th>Username</th><th>Tên chi nhánh</th><th>Admin</th><th>Hành động</th>
+          </tr>
+        </thead>
+        <tbody>
+          {users.map(user => (
+            <tr key={user.id} className="text-center border-t">
+              <td>{user.id}</td>
+              <td>{user.username}</td>
+              <td>{user.ten_chi_nhanh}</td>
+              <td>{user.is_admin ? "✔" : ""}</td>
+              <td>
+                <button
+                  onClick={() => {
+                    setForm({
+                      username: user.username || "",
+                      password: "",
+                      ten_chi_nhanh: user.ten_chi_nhanh || "",
+                      is_admin: user.is_admin || false
+                    });
+                    setEditId(user.id);
+                  }}
+                  className="text-blue-600 mr-2"
+                >
+                  Sửa
+                </button>
+                <button
+                  onClick={() => handleDelete(user.id)}
+                  className="text-red-600"
+                >
+                  Xoá
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export default AdminAccounts;
+
+
 ===== FILE: frontend/src\pages\LoginPage.jsx =====
 import React, { useState } from "react";
 import axios from "axios";
@@ -321,7 +838,7 @@ function LoginPage() {
 
       const response = await axios.post("http://localhost:8000/auth/login", form);
       localStorage.setItem("token", response.data.access_token);
-      navigate("/dashboard");
+      navigate("dashboard");
     } catch (err) {
       setError("Sai tài khoản hoặc mật khẩu");
     }
@@ -363,6 +880,7 @@ export default LoginPage;
 import { createBrowserRouter } from "react-router-dom";
 import App from "../App";
 import LoginPage from "../pages/LoginPage";
+import AdminAccounts from "../pages/AdminAccounts";
 
 export const router = createBrowserRouter([
   {
@@ -373,5 +891,46 @@ export const router = createBrowserRouter([
     path: "/dashboard",
     element: <App />,
   },
+  {
+    path: "/admin/accounts",
+    element: <AdminAccounts />
+  }
 ]);
+
+
+===== FILE: frontend/src\services\api.js =====
+import axios from "axios";
+
+const instance = axios.create({
+  baseURL: "http://localhost:8000", // hoặc URL thật khi deploy
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
+
+export default instance;
+
+===== FILE: frontend/src\services\userService.js =====
+
+import axios from "./api";
+
+export const fetchUsers = (token) =>
+  axios.get("/admin/user", {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+
+export const createUser = (data, token) =>
+  axios.post("/admin/user", data, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+
+export const updateUser = (id, data, token) =>
+  axios.put(`/admin/user/${id}`, data, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+
+export const deleteUser = (id, token) =>
+  axios.delete(`/admin/user/${id}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
 
