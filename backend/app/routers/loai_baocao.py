@@ -5,7 +5,7 @@ from sqlalchemy.future import select
 
 from ..schemas.loai_baocao import LoaiBaoCaoCreate, LoaiBaoCaoOut
 from ..models.loai_baocao import LoaiBaoCao
-from ..dependencies.auth import get_current_admin
+from ..dependencies.auth import get_current_admin, get_current_user
 from ..database import get_db
 
 router = APIRouter()
@@ -44,3 +44,8 @@ async def delete(id: int, db: AsyncSession = Depends(get_db), admin=Depends(get_
     await db.delete(obj)
     await db.commit()
     return {"msg": "Đã xoá"}
+
+@router.get("/public", response_model=list[LoaiBaoCaoOut], tags=["Loại báo cáo công khai"])
+async def get_all_public(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    result = await db.execute(select(LoaiBaoCao))
+    return result.scalars().all()

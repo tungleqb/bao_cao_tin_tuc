@@ -13,7 +13,7 @@ function UploadReport() {
 
   useEffect(() => {
     axios
-      .get("http://localhost:8000/admin/loaibaocao", {
+      .get("http://localhost:8000/admin/loaibaocao/public", {
         headers: { Authorization: `Bearer ${token}` },
       })
       .then((res) => setLoaiBaoCaos(res.data))
