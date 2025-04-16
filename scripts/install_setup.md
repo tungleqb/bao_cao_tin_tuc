@@ -77,3 +77,6 @@ DATABASE_URL = "postgresql+asyncpg://user:password@localhost/baocao"
 3. Cài thư viện và chạy:
 pip install -r requirements.txt
 PYTHONPATH=. uvicorn app.main:app --reload
+
+
+mkdir -p backend/app/static/reports

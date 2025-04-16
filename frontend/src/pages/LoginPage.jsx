@@ -17,7 +17,7 @@ function LoginPage() {
 
       const response = await axios.post("http://localhost:8000/auth/login", form);
       localStorage.setItem("token", response.data.access_token);
-      navigate("/admin/accounts");
+      navigate("dashboard");
     } catch (err) {
       setError("Sai tài khoản hoặc mật khẩu");
     }

@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import auth, user
 from .database import engine, Base
+from .routers import report
+from .routers import loai_baocao
 
 app = FastAPI()
 
@@ -15,6 +17,8 @@ app.add_middleware(
 
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(user.router, prefix="/admin/user", tags=["Admin User"])
+app.include_router(report.router, prefix="/report", tags=["Report"])
+app.include_router(loai_baocao.router, prefix="/admin/loaibaocao", tags=["Loại báo cáo"])
 
 @app.on_event("startup")
 async def on_startup():
