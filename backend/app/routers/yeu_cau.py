@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from fastapi.responses import JSONResponse
+from sqlalchemy.orm import selectinload
 from ..database import get_db
 from ..models.yeu_cau_baocao import YeuCauBaoCao
 from ..models.user import User
@@ -29,7 +30,9 @@ async def create_request(data: YeuCauBaoCaoCreate, db: AsyncSession = Depends(ge
 
 @router.get("/")
 async def get_all_requests(db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
-    result = await db.execute(select(YeuCauBaoCao))
+    result = await db.execute(
+        select(YeuCauBaoCao).options(selectinload(YeuCauBaoCao.users))
+    )
     all_requests = result.scalars().all()
 
     data = []
