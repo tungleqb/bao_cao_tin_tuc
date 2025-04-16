@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from fastapi.responses import JSONResponse
 from ..database import get_db
 from ..models.yeu_cau_baocao import YeuCauBaoCao
 from ..models.user import User
@@ -26,7 +27,18 @@ async def create_request(data: YeuCauBaoCaoCreate, db: AsyncSession = Depends(ge
     await db.refresh(req)
     return YeuCauBaoCaoOut.from_orm_with_users(req)
 
-@router.get("/", response_model=list[YeuCauBaoCaoOut])
+@router.get("/")
 async def get_all_requests(db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
     result = await db.execute(select(YeuCauBaoCao))
-    return result.scalars().all()
+    all_requests = result.scalars().all()
+
+    data = []
+    for req in all_requests:
+        data.append({
+            "id": req.id,
+            "loai_baocao_id": req.loai_baocao_id,
+            "dinh_ky": req.dinh_ky,
+            "user_ids": [u.id for u in req.users]
+        })
+
+    return JSONResponse(content=data)
