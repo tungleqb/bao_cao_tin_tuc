@@ -1,8 +1,6 @@
 from logging.config import fileConfig
 from sqlalchemy import pool
 from alembic import context
-import asyncio
-
 from app.models import user, loai_baocao, report  # Import models
 from app.database import Base
 from app.config import settings
@@ -22,18 +20,14 @@ def run_migrations_offline():
         context.run_migrations()
 
 def run_migrations_online():
-    from sqlalchemy.ext.asyncio import AsyncEngine
-    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy import create_engine
 
-    connectable = create_async_engine(settings.DATABASE_URL, poolclass=pool.NullPool)
+    connectable = create_engine(settings.DATABASE_URL.replace("asyncpg", "psycopg2"))
 
-    async def do_run_migrations():
-        async with connectable.connect() as connection:
-            await connection.run_sync(lambda sync_conn: context.configure(
-                connection=sync_conn, target_metadata=target_metadata
-            ))
-            await context.run_migrations()
-    asyncio.run(do_run_migrations())
+    with connectable.connect() as connection:
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
 
 
 if context.is_offline_mode():
