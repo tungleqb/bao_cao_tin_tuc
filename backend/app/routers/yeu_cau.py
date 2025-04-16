@@ -24,7 +24,7 @@ async def create_request(data: YeuCauBaoCaoCreate, db: AsyncSession = Depends(ge
     db.add(req)
     await db.commit()
     await db.refresh(req)
-    return req
+    return YeuCauBaoCaoOut.from_orm_with_users(req)
 
 @router.get("/", response_model=list[YeuCauBaoCaoOut])
 async def get_all_requests(db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
