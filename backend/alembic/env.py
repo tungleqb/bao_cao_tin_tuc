@@ -2,9 +2,9 @@ from logging.config import fileConfig
 from sqlalchemy import pool
 from alembic import context
 
-from backend.app.models import user, loai_baocao, report  # Import models
-from backend.app.database import Base
-from backend.app.config import settings
+from app.models import user, loai_baocao, report  # Import models
+from app.database import Base
+from app.config import settings
 
 config = context.config
 fileConfig(config.config_file_name)
