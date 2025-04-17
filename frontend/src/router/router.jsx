@@ -3,6 +3,8 @@ import App from "../App";
 import LoginPage from "../pages/LoginPage";
 import AdminAccounts from "../pages/AdminAccounts";
 import UploadReport from "../pages/UploadReport";
+import AdminLoaiBaoCao from "../pages/AdminLoaiBaoCao";
+import AdminYeuCauBaoCao from "../pages/AdminYeuCauBaoCao";
 
 export const router = createBrowserRouter([
   {
