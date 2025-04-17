@@ -18,6 +18,14 @@ export const router = createBrowserRouter([
     element: <AdminAccounts />,
   },
   {
+    path: "/admin/loaibaocao",
+    element: <AdminLoaiBaoCao />,
+  },
+  {
+    path: "/admin/yeucau",
+    element: <AdminYeuCauBaoCao />,
+  },
+  {
     path: "/upload-report",
     element: <UploadReport />,
   }
