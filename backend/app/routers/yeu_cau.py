@@ -27,8 +27,14 @@ async def create_request(data: YeuCauBaoCaoCreate, db: AsyncSession = Depends(ge
     )
     db.add(req)
     await db.commit()
-    await db.refresh(req)
     await log_action(db, admin.id, "create", "YeuCauBaoCao", req.id, f"Tạo yêu cầu báo cáo tới {len(user_list)} chi nhánh")
+
+    # Truy vấn lại bằng selectinload để tránh lỗi greenlet
+    refreshed = await db.execute(
+        select(YeuCauBaoCao).options(selectinload(YeuCauBaoCao.users)).where(YeuCauBaoCao.id == req.id)
+    )
+    req = refreshed.scalar_one()
+
     return YeuCauBaoCaoOut(
         id=req.id,
         loai_baocao_id=req.loai_baocao_id,
@@ -72,6 +78,11 @@ async def update_request(id: int, data: YeuCauBaoCaoCreate, db: AsyncSession = D
     await db.commit()
     await db.refresh(req)
     await log_action(db, admin.id, "update", "YeuCauBaoCao", req.id, "Cập nhật yêu cầu báo cáo")
+
+    refreshed = await db.execute(
+        select(YeuCauBaoCao).options(selectinload(YeuCauBaoCao.users)).where(YeuCauBaoCao.id == req.id)
+    )
+    req = refreshed.scalar_one()
 
     return YeuCauBaoCaoOut(
         id=req.id,
