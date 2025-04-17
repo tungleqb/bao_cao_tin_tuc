@@ -1,6 +1,8 @@
+
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import CountdownClock from "../components/CountdownClock";
+import { getMyReportRequests } from "../services/requestService";
 
 function UploadReport() {
   const [loaiBaoCaos, setLoaiBaoCaos] = useState([]);
@@ -12,12 +14,20 @@ function UploadReport() {
   const token = localStorage.getItem("token");
 
   useEffect(() => {
-    axios
-      .get("http://localhost:8000/admin/loaibaocao/public", {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      .then((res) => setLoaiBaoCaos(res.data))
-      .catch(() => setStatusMsg("Không thể tải loại báo cáo"));
+    const fetchData = async () => {
+      try {
+        const res = await getMyReportRequests(token);
+        const requestLoaiIds = res.data.map(r => r.loai_baocao_id);
+        const allLoai = await axios.get("http://localhost:8000/admin/loaibaocao/public", {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const filteredLoai = allLoai.data.filter(l => requestLoaiIds.includes(l.id));
+        setLoaiBaoCaos(filteredLoai);
+      } catch (err) {
+        setStatusMsg("Không thể tải loại báo cáo");
+      }
+    };
+    fetchData();
   }, []);
 
   useEffect(() => {
