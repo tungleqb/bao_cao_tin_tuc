@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -29,7 +28,6 @@ async def create_request(data: YeuCauBaoCaoCreate, db: AsyncSession = Depends(ge
     db.add(req)
     await db.commit()
     await db.refresh(req)
-    await log_action(db, admin.id, "update", "YeuCauBaoCao", req.id, "Cập nhật yêu cầu báo cáo")
     await log_action(db, admin.id, "create", "YeuCauBaoCao", req.id, f"Tạo yêu cầu báo cáo tới {len(user_list)} chi nhánh")
     return YeuCauBaoCaoOut(
         id=req.id,
@@ -73,7 +71,7 @@ async def update_request(id: int, data: YeuCauBaoCaoCreate, db: AsyncSession = D
 
     await db.commit()
     await db.refresh(req)
-    await log_action(db, admin.id, "create", "YeuCauBaoCao", req.id, f"Tạo yêu cầu báo cáo tới {len(user_list)} chi nhánh")
+    await log_action(db, admin.id, "update", "YeuCauBaoCao", req.id, "Cập nhật yêu cầu báo cáo")
 
     return YeuCauBaoCaoOut(
         id=req.id,

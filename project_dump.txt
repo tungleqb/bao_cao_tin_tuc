@@ -330,9 +330,10 @@ class User(Base):
 
 
 ===== FILE: backend/app\models\yeu_cau_baocao.py =====
-from sqlalchemy import Column, Integer, ForeignKey, Table
+from sqlalchemy import Column, Integer, ForeignKey, Table, Boolean, Enum
 from sqlalchemy.orm import relationship
 from ..database import Base
+import enum
 
 yeu_cau_user_table = Table(
     "yeu_cau_user", Base.metadata,
@@ -340,17 +341,38 @@ yeu_cau_user_table = Table(
     Column("user_id", ForeignKey("users.id")),
 )
 
+class DinhKyEnum(str, enum.Enum):
+    hour = "hour"
+    day = "day"
+    month = "month"
+
 class YeuCauBaoCao(Base):
     __tablename__ = "yeu_cau_baocao"
 
     id = Column(Integer, primary_key=True, index=True)
     loai_baocao_id = Column(Integer, ForeignKey("loai_baocao.id"))
-    dinh_ky = Column(Integer, default=0)
+    dinh_ky_value = Column(Integer, default=0)
+    dinh_ky_unit = Column(Enum(DinhKyEnum), default=DinhKyEnum.day)
+    is_active = Column(Boolean, default=True)
 
     users = relationship("User", secondary=yeu_cau_user_table)
 
 
 ===== FILE: backend/app\routers\audit_log.py =====
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from ..models.audit_log import AuditLog
+from ..schemas.audit_log import AuditLogOut
+from ..database import get_db
+from ..dependencies.auth import get_current_admin
+
+router = APIRouter()
+
+@router.get("/logs", response_model=list[AuditLogOut])
+async def get_logs(db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    result = await db.execute(select(AuditLog).order_by(AuditLog.timestamp.desc()))
+    return result.scalars().all()
 
 
 ===== FILE: backend/app\routers\auth.py =====
@@ -574,13 +596,13 @@ from sqlalchemy.orm import selectinload
 from ..database import get_db
 from ..models.yeu_cau_baocao import YeuCauBaoCao
 from ..models.user import User
-from ..schemas.yeu_cau import YeuCauBaoCaoCreate
+from ..schemas.yeu_cau import YeuCauBaoCaoCreate, YeuCauBaoCaoOut
 from ..dependencies.auth import get_current_admin
 from ..crud.audit_log import log_action
 
 router = APIRouter()
 
-@router.post("/")
+@router.post("/", response_model=YeuCauBaoCaoOut)
 async def create_request(data: YeuCauBaoCaoCreate, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
     users = await db.execute(select(User).where(User.id.in_(data.user_ids)))
     user_list = users.scalars().all()
@@ -589,46 +611,43 @@ async def create_request(data: YeuCauBaoCaoCreate, db: AsyncSession = Depends(ge
 
     req = YeuCauBaoCao(
         loai_baocao_id=data.loai_baocao_id,
-        dinh_ky=data.dinh_ky,
+        dinh_ky_value=data.dinh_ky_value,
+        dinh_ky_unit=data.dinh_ky_unit,
+        is_active=data.is_active,
         users=user_list
     )
     db.add(req)
     await db.commit()
-    await log_action(db, admin.id, "create", "YeuCauBaoCao", req.id, f"Tạo yêu cầu cho loại báo cáo ID {req.loai_baocao_id} tới {len(req.users)} chi nhánh")
     await db.refresh(req)
-
-    result = await db.execute(
-        select(YeuCauBaoCao).options(selectinload(YeuCauBaoCao.users)).where(YeuCauBaoCao.id == req.id)
+    await log_action(db, admin.id, "update", "YeuCauBaoCao", req.id, "Cập nhật yêu cầu báo cáo")
+    await log_action(db, admin.id, "create", "YeuCauBaoCao", req.id, f"Tạo yêu cầu báo cáo tới {len(user_list)} chi nhánh")
+    return YeuCauBaoCaoOut(
+        id=req.id,
+        loai_baocao_id=req.loai_baocao_id,
+        dinh_ky_value=req.dinh_ky_value,
+        dinh_ky_unit=req.dinh_ky_unit,
+        is_active=req.is_active,
+        user_ids=[u.id for u in req.users]
     )
-    loaded_req = result.scalar_one()
 
-    return JSONResponse(content={
-        "id": loaded_req.id,
-        "loai_baocao_id": loaded_req.loai_baocao_id,
-        "dinh_ky": loaded_req.dinh_ky,
-        "user_ids": [u.id for u in loaded_req.users]
-    })
-
-
-@router.get("/")
-async def get_all_requests(db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+@router.get("/", response_model=list[YeuCauBaoCaoOut])
+async def get_requests(db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
     result = await db.execute(
         select(YeuCauBaoCao).options(selectinload(YeuCauBaoCao.users))
     )
-    all_requests = result.scalars().all()
+    requests = result.scalars().all()
+    return [
+        YeuCauBaoCaoOut(
+            id=r.id,
+            loai_baocao_id=r.loai_baocao_id,
+            dinh_ky_value=r.dinh_ky_value,
+            dinh_ky_unit=r.dinh_ky_unit,
+            is_active=r.is_active,
+            user_ids=[u.id for u in r.users]
+        ) for r in requests
+    ]
 
-    data = []
-    for req in all_requests:
-        data.append({
-            "id": req.id,
-            "loai_baocao_id": req.loai_baocao_id,
-            "dinh_ky": req.dinh_ky,
-            "user_ids": [u.id for u in req.users]
-        })
-
-    return JSONResponse(content=data)
-
-@router.put("/{id}")
+@router.put("/{id}", response_model=YeuCauBaoCaoOut)
 async def update_request(id: int, data: YeuCauBaoCaoCreate, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
     result = await db.execute(select(YeuCauBaoCao).where(YeuCauBaoCao.id == id))
     req = result.scalar_one_or_none()
@@ -638,24 +657,22 @@ async def update_request(id: int, data: YeuCauBaoCaoCreate, db: AsyncSession = D
     user_result = await db.execute(select(User).where(User.id.in_(data.user_ids)))
     req.users = user_result.scalars().all()
     req.loai_baocao_id = data.loai_baocao_id
-    req.dinh_ky = data.dinh_ky
+    req.dinh_ky_value = data.dinh_ky_value
+    req.dinh_ky_unit = data.dinh_ky_unit
+    req.is_active = data.is_active
 
     await db.commit()
-    await log_action(db, admin.id, "update", "YeuCauBaoCao", id, f"Cập nhật yêu cầu báo cáo ID {id}")
     await db.refresh(req)
+    await log_action(db, admin.id, "create", "YeuCauBaoCao", req.id, f"Tạo yêu cầu báo cáo tới {len(user_list)} chi nhánh")
 
-    result = await db.execute(
-        select(YeuCauBaoCao).options(selectinload(YeuCauBaoCao.users)).where(YeuCauBaoCao.id == req.id)
+    return YeuCauBaoCaoOut(
+        id=req.id,
+        loai_baocao_id=req.loai_baocao_id,
+        dinh_ky_value=req.dinh_ky_value,
+        dinh_ky_unit=req.dinh_ky_unit,
+        is_active=req.is_active,
+        user_ids=[u.id for u in req.users]
     )
-    loaded_req = result.scalar_one()
-
-    return JSONResponse(content={
-        "id": loaded_req.id,
-        "loai_baocao_id": loaded_req.loai_baocao_id,
-        "dinh_ky": loaded_req.dinh_ky,
-        "user_ids": [u.id for u in loaded_req.users]
-    })
-
 
 @router.delete("/{id}")
 async def delete_request(id: int, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
@@ -666,7 +683,7 @@ async def delete_request(id: int, db: AsyncSession = Depends(get_db), admin=Depe
 
     await db.delete(req)
     await db.commit()
-    await log_action(db, admin.id, "delete", "YeuCauBaoCao", id, f"Xoá yêu cầu báo cáo ID {id}")
+    await log_action(db, admin.id, "delete", "YeuCauBaoCao", req.id, "Xoá yêu cầu báo cáo")
     return {"msg": "Đã xoá yêu cầu báo cáo"}
 
 
@@ -749,32 +766,32 @@ class UserOut(BaseModel):
 
 
 ===== FILE: backend/app\schemas\yeu_cau.py =====
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List
-from pydantic import Field
+from enum import Enum
+
+class DinhKyEnum(str, Enum):
+    hour = "hour"
+    day = "day"
+    month = "month"
 
 class YeuCauBaoCaoCreate(BaseModel):
     loai_baocao_id: int
     user_ids: List[int]
-    dinh_ky: int = 0
+    dinh_ky_value: int = 0
+    dinh_ky_unit: DinhKyEnum = DinhKyEnum.day
+    is_active: bool = True
 
 class YeuCauBaoCaoOut(BaseModel):
     id: int
     loai_baocao_id: int
-    dinh_ky: int
+    dinh_ky_value: int
+    dinh_ky_unit: DinhKyEnum
+    is_active: bool
     user_ids: List[int] = Field(...)
 
-    @staticmethod
-    def from_orm_with_users(obj):
-        return YeuCauBaoCaoOut(
-            id=obj.id,
-            loai_baocao_id=obj.loai_baocao_id,
-            dinh_ky=obj.dinh_ky,
-            user_ids=[user.id for user in obj.users],
-        )
-
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 ===== FILE: backend/app\services\auth.py =====
@@ -892,9 +909,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <RouterProvider router={router} />
   </React.StrictMode>
 )
-
-
-===== FILE: frontend/src\router.jsx =====
 
 
 ===== FILE: frontend/src\components\CountdownClock.jsx =====
@@ -1148,8 +1162,14 @@ function AdminYeuCauBaoCao() {
   const [requests, setRequests] = useState([]);
   const [users, setUsers] = useState([]);
   const [loaiBaoCao, setLoaiBaoCao] = useState([]);
-  const [form, setForm] = useState({ loai_baocao_id: "", user_ids: [], dinh_ky: 0 });
-  const [filter, setFilter] = useState({ loai_baocao_id: "", user_id: "" });
+  const [form, setForm] = useState({
+    loai_baocao_id: "",
+    user_ids: [],
+    dinh_ky_value: 0,
+    dinh_ky_unit: "day",
+    is_active: true
+  });
+  const [editId, setEditId] = useState(null);
   const token = localStorage.getItem("token");
 
   const loadAll = async () => {
@@ -1160,89 +1180,120 @@ function AdminYeuCauBaoCao() {
     ]);
     setRequests(r1.data);
     setUsers(r2.data);
-    setLoaiBaoCao(r3.data);
+    setLoaiBaoCao(r3.data.filter(l => new Date(l.han_gui) > new Date())); // lọc còn hiệu lực
   };
 
   useEffect(() => { loadAll(); }, []);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    await axios.post("/report/request", form, { headers: { Authorization: `Bearer ${token}` } });
-    setForm({ loai_baocao_id: "", user_ids: [], dinh_ky: 0 });
-    loadAll();
-  };
 
   const handleCheckbox = (id) => {
     const ids = form.user_ids.includes(id) ? form.user_ids.filter(x => x !== id) : [...form.user_ids, id];
     setForm({ ...form, user_ids: ids });
   };
 
-  const filtered = requests.filter(r => {
-    return (
-      (!filter.loai_baocao_id || r.loai_baocao_id === parseInt(filter.loai_baocao_id)) &&
-      (!filter.user_id || r.user_ids.includes(parseInt(filter.user_id)))
-    );
-  });
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (editId) {
+      await axios.put(`/report/request/${editId}`, form, { headers: { Authorization: `Bearer ${token}` } });
+    } else {
+      await axios.post("/report/request", form, { headers: { Authorization: `Bearer ${token}` } });
+    }
+    setForm({ loai_baocao_id: "", user_ids: [], dinh_ky_value: 0, dinh_ky_unit: "day", is_active: true });
+    setEditId(null);
+    loadAll();
+  };
 
-  const exportCSV = () => {
-    const headers = ["ID", "Loại báo cáo", "Chi nhánh", "Định kỳ"];
-    const rows = filtered.map(r => [
-      r.id,
-      r.loai_baocao_id,
-      r.user_ids.join("; "),
-      r.dinh_ky
-    ]);
-    const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = "yeu_cau_baocao.csv";
-    link.click();
+  const handleDelete = async (id) => {
+    if (window.confirm("Bạn có chắc muốn xoá?")) {
+      await axios.delete(`/report/request/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+      loadAll();
+    }
+  };
+
+  const toggleActive = async (id, current) => {
+    await axios.put(`/report/request/${id}`, { is_active: !current }, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    loadAll();
   };
 
   return (
     <div className="p-4">
-      <h2 className="text-xl font-bold mb-4">Tạo yêu cầu báo cáo</h2>
-      <form onSubmit={handleSubmit} className="space-y-2">
-        <select value={form.loai_baocao_id} onChange={e => setForm({ ...form, loai_baocao_id: parseInt(e.target.value) })} className="border px-2 py-1">
+      <h2 className="text-xl font-bold mb-4">Quản lý yêu cầu báo cáo</h2>
+      <form onSubmit={handleSubmit} className="space-y-2 mb-4">
+        <select
+          value={form.loai_baocao_id}
+          onChange={e => setForm({ ...form, loai_baocao_id: parseInt(e.target.value) })}
+          className="border px-2 py-1"
+          required
+        >
           <option value="">-- Chọn loại báo cáo --</option>
           {loaiBaoCao.map(l => <option key={l.id} value={l.id}>{l.ten_loai}</option>)}
         </select>
         <div>
           {users.map(u => (
             <label key={u.id} className="inline-block mr-4">
-              <input type="checkbox" checked={form.user_ids.includes(u.id)} onChange={() => handleCheckbox(u.id)} />
+              <input
+                type="checkbox"
+                checked={form.user_ids.includes(u.id)}
+                onChange={() => handleCheckbox(u.id)}
+              />
               <span className="ml-1">{u.ten_chi_nhanh}</span>
             </label>
           ))}
         </div>
-        <input type="number" value={form.dinh_ky} onChange={e => setForm({ ...form, dinh_ky: parseInt(e.target.value) })} placeholder="Định kỳ" className="border px-2 py-1" />
-        <button type="submit" className="bg-blue-600 text-white px-4 py-1 rounded">Gửi yêu cầu</button>
+        <div className="flex space-x-2">
+          <input
+            type="number"
+            value={form.dinh_ky_value}
+            onChange={e => setForm({ ...form, dinh_ky_value: parseInt(e.target.value) })}
+            className="border px-2 py-1 w-1/3"
+            placeholder="Định kỳ"
+          />
+          <select
+            value={form.dinh_ky_unit}
+            onChange={e => setForm({ ...form, dinh_ky_unit: e.target.value })}
+            className="border px-2 py-1 w-1/3"
+          >
+            <option value="hour">Giờ</option>
+            <option value="day">Ngày</option>
+            <option value="month">Tháng</option>
+          </select>
+        </div>
+        <button type="submit" className="bg-blue-600 text-white px-4 py-1 rounded">
+          {editId ? "Cập nhật" : "Tạo yêu cầu"}
+        </button>
       </form>
 
-      <h3 className="text-lg font-bold mt-6 mb-2">Bộ lọc</h3>
-      <div className="space-x-2 mb-2">
-        <select value={filter.loai_baocao_id} onChange={e => setFilter({ ...filter, loai_baocao_id: e.target.value })} className="border px-2 py-1">
-          <option value="">-- Loại báo cáo --</option>
-          {loaiBaoCao.map(l => <option key={l.id} value={l.id}>{l.ten_loai}</option>)}
-        </select>
-        <select value={filter.user_id} onChange={e => setFilter({ ...filter, user_id: e.target.value })} className="border px-2 py-1">
-          <option value="">-- Chi nhánh --</option>
-          {users.map(u => <option key={u.id} value={u.id}>{u.ten_chi_nhanh}</option>)}
-        </select>
-        <button onClick={exportCSV} className="bg-green-600 text-white px-3 py-1 rounded">Export CSV</button>
-      </div>
-
-      <h3 className="text-lg font-bold mb-2">Danh sách yêu cầu</h3>
       <table className="table-auto border w-full text-sm">
-        <thead><tr className="bg-gray-200"><th>ID</th><th>Loại báo cáo</th><th>Chi nhánh</th><th>Định kỳ</th></tr></thead>
+        <thead>
+          <tr className="bg-gray-200 text-center">
+            <th>ID</th><th>Loại</th><th>Chi nhánh</th><th>Định kỳ</th><th>Kích hoạt</th><th>Hành động</th>
+          </tr>
+        </thead>
         <tbody>
-          {filtered.map(r => (
-            <tr key={r.id} className="border-t text-center">
+          {requests.map(r => (
+            <tr key={r.id} className="text-center border-t">
               <td>{r.id}</td>
-              <td>{r.loai_baocao_id}</td>
-              <td>{r.user_ids.join(", ")}</td>
-              <td>{r.dinh_ky}</td>
+              <td>{loaiBaoCao.find(l => l.id === r.loai_baocao_id)?.ten_loai || r.loai_baocao_id}</td>
+              <td>{r.user_ids.map(id => users.find(u => u.id === id)?.ten_chi_nhanh || id).join(", ")}</td>
+              <td>{r.dinh_ky_value} {r.dinh_ky_unit}</td>
+              <td>{r.is_active ? "✔️" : "❌"}</td>
+              <td>
+                <button onClick={() => {
+                  setForm({
+                    loai_baocao_id: r.loai_baocao_id,
+                    user_ids: r.user_ids,
+                    dinh_ky_value: r.dinh_ky_value,
+                    dinh_ky_unit: r.dinh_ky_unit,
+                    is_active: r.is_active
+                  });
+                  setEditId(r.id);
+                }} className="text-blue-600 mr-2">Sửa</button>
+                <button onClick={() => handleDelete(r.id)} className="text-red-600 mr-2">Xoá</button>
+                <button onClick={() => toggleActive(r.id, r.is_active)} className="text-yellow-600">
+                  {r.is_active ? "Huỷ kích hoạt" : "Kích hoạt lại"}
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -1442,6 +1493,8 @@ import App from "../App";
 import LoginPage from "../pages/LoginPage";
 import AdminAccounts from "../pages/AdminAccounts";
 import UploadReport from "../pages/UploadReport";
+import AdminLoaiBaoCao from "../pages/AdminLoaiBaoCao";
+import AdminYeuCauBaoCao from "../pages/AdminYeuCauBaoCao";
 
 export const router = createBrowserRouter([
   {
@@ -1455,6 +1508,14 @@ export const router = createBrowserRouter([
   {
     path: "/admin/accounts",
     element: <AdminAccounts />,
+  },
+  {
+    path: "/admin/loaibaocao",
+    element: <AdminLoaiBaoCao />,
+  },
+  {
+    path: "/admin/yeucau",
+    element: <AdminYeuCauBaoCao />,
   },
   {
     path: "/upload-report",
