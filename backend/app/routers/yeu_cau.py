@@ -8,6 +8,7 @@ from ..models.user import User
 from ..schemas.yeu_cau import YeuCauBaoCaoCreate, YeuCauBaoCaoOut
 from ..dependencies.auth import get_current_admin
 from ..crud.audit_log import log_action
+from ..schemas.yeu_cau import ActiveUpdate
 
 router = APIRouter()
 
@@ -104,3 +105,31 @@ async def delete_request(id: int, db: AsyncSession = Depends(get_db), admin=Depe
     await db.commit()
     await log_action(db, admin.id, "delete", "YeuCauBaoCao", req.id, "Xoá yêu cầu báo cáo")
     return {"msg": "Đã xoá yêu cầu báo cáo"}
+
+
+@router.put("/{id}/active", response_model=YeuCauBaoCaoOut)
+async def update_active_status(id: int, data: ActiveUpdate, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    result = await db.execute(select(YeuCauBaoCao).where(YeuCauBaoCao.id == id))
+    req = result.scalar_one_or_none()
+    if not req:
+        raise HTTPException(status_code=404, detail="Không tìm thấy yêu cầu")
+
+    req.is_active = data.is_active
+    await db.commit()
+    await db.refresh(req)
+
+    await log_action(db, admin.id, "update", "YeuCauBaoCao", req.id, f"{'Kích hoạt' if data.is_active else 'Huỷ kích hoạt'} yêu cầu")
+
+    refreshed = await db.execute(
+        select(YeuCauBaoCao).options(selectinload(YeuCauBaoCao.users)).where(YeuCauBaoCao.id == req.id)
+    )
+    req = refreshed.scalar_one()
+
+    return YeuCauBaoCaoOut(
+        id=req.id,
+        loai_baocao_id=req.loai_baocao_id,
+        dinh_ky_value=req.dinh_ky_value,
+        dinh_ky_unit=req.dinh_ky_unit,
+        is_active=req.is_active,
+        user_ids=[u.id for u in req.users]
+    )
