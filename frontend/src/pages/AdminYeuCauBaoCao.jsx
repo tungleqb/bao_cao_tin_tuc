@@ -53,7 +53,7 @@ function AdminYeuCauBaoCao() {
   };
 
   const toggleActive = async (id, current) => {
-    await axios.put(`/report/request/${id}`, { is_active: !current }, {
+    await axios.put(`/report/request/${id}/active`, { is_active: !current }, {
       headers: { Authorization: `Bearer ${token}` }
     });
     loadAll();

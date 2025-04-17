@@ -2,6 +2,9 @@ from pydantic import BaseModel, Field
 from typing import List
 from enum import Enum
 
+class ActiveUpdate(BaseModel):
+    is_active: bool
+
 class DinhKyEnum(str, Enum):
     hour = "hour"
     day = "day"
