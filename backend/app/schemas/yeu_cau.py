@@ -1,26 +1,26 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List
-from pydantic import Field
+from enum import Enum
+
+class DinhKyEnum(str, Enum):
+    hour = "hour"
+    day = "day"
+    month = "month"
 
 class YeuCauBaoCaoCreate(BaseModel):
     loai_baocao_id: int
     user_ids: List[int]
-    dinh_ky: int = 0
+    dinh_ky_value: int = 0
+    dinh_ky_unit: DinhKyEnum = DinhKyEnum.day
+    is_active: bool = True
 
 class YeuCauBaoCaoOut(BaseModel):
     id: int
     loai_baocao_id: int
-    dinh_ky: int
+    dinh_ky_value: int
+    dinh_ky_unit: DinhKyEnum
+    is_active: bool
     user_ids: List[int] = Field(...)
 
-    @staticmethod
-    def from_orm_with_users(obj):
-        return YeuCauBaoCaoOut(
-            id=obj.id,
-            loai_baocao_id=obj.loai_baocao_id,
-            dinh_ky=obj.dinh_ky,
-            user_ids=[user.id for user in obj.users],
-        )
-
     class Config:
-        orm_mode = True
+        from_attributes = True
