@@ -5,6 +5,7 @@ from .database import engine, Base
 from .routers import report
 from .routers import loai_baocao
 from .routers import yeu_cau
+from .routers import audit_log
 
 app = FastAPI()
 
@@ -18,6 +19,7 @@ app.add_middleware(
 
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(user.router, prefix="/admin/user", tags=["Admin User"])
+app.include_router(audit_log.router, prefix="/admin", tags=["Audit Log"])
 app.include_router(report.router, prefix="/report", tags=["Report"])
 app.include_router(loai_baocao.router, prefix="/admin/loaibaocao", tags=["Loại báo cáo"])
 app.include_router(yeu_cau.router, prefix="/report/request", tags=["Yêu cầu báo cáo"])

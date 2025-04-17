@@ -176,6 +176,8 @@ from .routers import auth, user
 from .database import engine, Base
 from .routers import report
 from .routers import loai_baocao
+from .routers import yeu_cau
+from .routers import audit_log
 
 app = FastAPI()
 
@@ -189,8 +191,10 @@ app.add_middleware(
 
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(user.router, prefix="/admin/user", tags=["Admin User"])
+app.include_router(audit_log.router, prefix="/admin", tags=["Audit Log"])
 app.include_router(report.router, prefix="/report", tags=["Report"])
 app.include_router(loai_baocao.router, prefix="/admin/loaibaocao", tags=["Loại báo cáo"])
+app.include_router(yeu_cau.router, prefix="/report/request", tags=["Yêu cầu báo cáo"])
 
 @app.on_event("startup")
 async def on_startup():
@@ -203,6 +207,21 @@ async def ping():
 
 
 
+
+
+===== FILE: backend/app\crud\audit_log.py =====
+from ..models.audit_log import AuditLog
+
+async def log_action(db, user_id: int, action: str, model: str, model_id: int | None = None, details: str = ""):
+    log = AuditLog(
+        user_id=user_id,
+        action=action,
+        model=model,
+        model_id=model_id,
+        details=details
+    )
+    db.add(log)
+    await db.commit()
 
 
 ===== FILE: backend/app\dependencies\auth.py =====
@@ -241,6 +260,23 @@ async def get_current_admin(user: UserOut = Depends(get_current_user)):
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="Không có quyền truy cập")
     return user
+
+
+===== FILE: backend/app\models\audit_log.py =====
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy.sql import func
+from ..database import Base
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    action = Column(String, nullable=False)  # create / update / delete
+    model = Column(String, nullable=False)   # LoaiBaoCao / YeuCauBaoCao
+    model_id = Column(Integer, nullable=True)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    details = Column(Text, nullable=True)
 
 
 ===== FILE: backend/app\models\loai_baocao.py =====
@@ -293,6 +329,30 @@ class User(Base):
     is_admin = Column(Boolean, default=False)
 
 
+===== FILE: backend/app\models\yeu_cau_baocao.py =====
+from sqlalchemy import Column, Integer, ForeignKey, Table
+from sqlalchemy.orm import relationship
+from ..database import Base
+
+yeu_cau_user_table = Table(
+    "yeu_cau_user", Base.metadata,
+    Column("yeu_cau_id", ForeignKey("yeu_cau_baocao.id")),
+    Column("user_id", ForeignKey("users.id")),
+)
+
+class YeuCauBaoCao(Base):
+    __tablename__ = "yeu_cau_baocao"
+
+    id = Column(Integer, primary_key=True, index=True)
+    loai_baocao_id = Column(Integer, ForeignKey("loai_baocao.id"))
+    dinh_ky = Column(Integer, default=0)
+
+    users = relationship("User", secondary=yeu_cau_user_table)
+
+
+===== FILE: backend/app\routers\audit_log.py =====
+
+
 ===== FILE: backend/app\routers\auth.py =====
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
@@ -341,6 +401,7 @@ from ..schemas.loai_baocao import LoaiBaoCaoCreate, LoaiBaoCaoOut
 from ..models.loai_baocao import LoaiBaoCao
 from ..dependencies.auth import get_current_admin, get_current_user
 from ..database import get_db
+from ..crud.audit_log import log_action
 
 router = APIRouter()
 
@@ -354,6 +415,7 @@ async def create(item: LoaiBaoCaoCreate, db: AsyncSession = Depends(get_db), adm
     obj = LoaiBaoCao(**item.dict())
     db.add(obj)
     await db.commit()
+    await log_action(db, admin.id, "create", "LoaiBaoCao", obj.id, f"Tạo loại báo cáo: {item.ten_loai}")
     await db.refresh(obj)
     return obj
 
@@ -366,6 +428,7 @@ async def update(id: int, item: LoaiBaoCaoCreate, db: AsyncSession = Depends(get
     for k, v in item.dict().items():
         setattr(obj, k, v)
     await db.commit()
+    await log_action(db, admin.id, "update", "LoaiBaoCao", id, f"Cập nhật loại báo cáo: {item.ten_loai}")
     await db.refresh(obj)
     return obj
 
@@ -377,6 +440,7 @@ async def delete(id: int, db: AsyncSession = Depends(get_db), admin=Depends(get_
         raise HTTPException(status_code=404, detail="Không tìm thấy")
     await db.delete(obj)
     await db.commit()
+    await log_action(db, admin.id, "delete", "LoaiBaoCao", id, f"Xoá loại báo cáo: {obj.ten_loai}")
     return {"msg": "Đã xoá"}
 
 @router.get("/public", response_model=list[LoaiBaoCaoOut], tags=["Loại báo cáo công khai"])
@@ -501,6 +565,127 @@ async def delete_user(user_id: int, db: AsyncSession = Depends(get_db), admin=De
     return {"msg": "Đã xoá tài khoản thành công"}
 
 
+===== FILE: backend/app\routers\yeu_cau.py =====
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
+from ..database import get_db
+from ..models.yeu_cau_baocao import YeuCauBaoCao
+from ..models.user import User
+from ..schemas.yeu_cau import YeuCauBaoCaoCreate
+from ..dependencies.auth import get_current_admin
+from ..crud.audit_log import log_action
+
+router = APIRouter()
+
+@router.post("/")
+async def create_request(data: YeuCauBaoCaoCreate, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    users = await db.execute(select(User).where(User.id.in_(data.user_ids)))
+    user_list = users.scalars().all()
+    if not user_list:
+        raise HTTPException(status_code=404, detail="Không tìm thấy chi nhánh")
+
+    req = YeuCauBaoCao(
+        loai_baocao_id=data.loai_baocao_id,
+        dinh_ky=data.dinh_ky,
+        users=user_list
+    )
+    db.add(req)
+    await db.commit()
+    await log_action(db, admin.id, "create", "YeuCauBaoCao", req.id, f"Tạo yêu cầu cho loại báo cáo ID {req.loai_baocao_id} tới {len(req.users)} chi nhánh")
+    await db.refresh(req)
+
+    result = await db.execute(
+        select(YeuCauBaoCao).options(selectinload(YeuCauBaoCao.users)).where(YeuCauBaoCao.id == req.id)
+    )
+    loaded_req = result.scalar_one()
+
+    return JSONResponse(content={
+        "id": loaded_req.id,
+        "loai_baocao_id": loaded_req.loai_baocao_id,
+        "dinh_ky": loaded_req.dinh_ky,
+        "user_ids": [u.id for u in loaded_req.users]
+    })
+
+
+@router.get("/")
+async def get_all_requests(db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    result = await db.execute(
+        select(YeuCauBaoCao).options(selectinload(YeuCauBaoCao.users))
+    )
+    all_requests = result.scalars().all()
+
+    data = []
+    for req in all_requests:
+        data.append({
+            "id": req.id,
+            "loai_baocao_id": req.loai_baocao_id,
+            "dinh_ky": req.dinh_ky,
+            "user_ids": [u.id for u in req.users]
+        })
+
+    return JSONResponse(content=data)
+
+@router.put("/{id}")
+async def update_request(id: int, data: YeuCauBaoCaoCreate, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    result = await db.execute(select(YeuCauBaoCao).where(YeuCauBaoCao.id == id))
+    req = result.scalar_one_or_none()
+    if not req:
+        raise HTTPException(status_code=404, detail="Không tìm thấy yêu cầu")
+
+    user_result = await db.execute(select(User).where(User.id.in_(data.user_ids)))
+    req.users = user_result.scalars().all()
+    req.loai_baocao_id = data.loai_baocao_id
+    req.dinh_ky = data.dinh_ky
+
+    await db.commit()
+    await log_action(db, admin.id, "update", "YeuCauBaoCao", id, f"Cập nhật yêu cầu báo cáo ID {id}")
+    await db.refresh(req)
+
+    result = await db.execute(
+        select(YeuCauBaoCao).options(selectinload(YeuCauBaoCao.users)).where(YeuCauBaoCao.id == req.id)
+    )
+    loaded_req = result.scalar_one()
+
+    return JSONResponse(content={
+        "id": loaded_req.id,
+        "loai_baocao_id": loaded_req.loai_baocao_id,
+        "dinh_ky": loaded_req.dinh_ky,
+        "user_ids": [u.id for u in loaded_req.users]
+    })
+
+
+@router.delete("/{id}")
+async def delete_request(id: int, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    result = await db.execute(select(YeuCauBaoCao).where(YeuCauBaoCao.id == id))
+    req = result.scalar_one_or_none()
+    if not req:
+        raise HTTPException(status_code=404, detail="Không tìm thấy yêu cầu")
+
+    await db.delete(req)
+    await db.commit()
+    await log_action(db, admin.id, "delete", "YeuCauBaoCao", id, f"Xoá yêu cầu báo cáo ID {id}")
+    return {"msg": "Đã xoá yêu cầu báo cáo"}
+
+
+===== FILE: backend/app\schemas\audit_log.py =====
+from pydantic import BaseModel
+from datetime import datetime
+
+class AuditLogOut(BaseModel):
+    id: int
+    action: str
+    model: str
+    model_id: int | None
+    timestamp: datetime
+    details: str | None
+
+    class Config:
+        from_attributes = True
+
+
 ===== FILE: backend/app\schemas\loai_baocao.py =====
 
 from pydantic import BaseModel
@@ -561,6 +746,35 @@ class UserOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+===== FILE: backend/app\schemas\yeu_cau.py =====
+from pydantic import BaseModel
+from typing import List
+from pydantic import Field
+
+class YeuCauBaoCaoCreate(BaseModel):
+    loai_baocao_id: int
+    user_ids: List[int]
+    dinh_ky: int = 0
+
+class YeuCauBaoCaoOut(BaseModel):
+    id: int
+    loai_baocao_id: int
+    dinh_ky: int
+    user_ids: List[int] = Field(...)
+
+    @staticmethod
+    def from_orm_with_users(obj):
+        return YeuCauBaoCaoOut(
+            id=obj.id,
+            loai_baocao_id=obj.loai_baocao_id,
+            dinh_ky=obj.dinh_ky,
+            user_ids=[user.id for user in obj.users],
+        )
+
+    class Config:
+        orm_mode = True
 
 
 ===== FILE: backend/app\services\auth.py =====
@@ -853,6 +1067,191 @@ function AdminAccounts() {
 }
 
 export default AdminAccounts;
+
+
+===== FILE: frontend/src\pages\AdminLoaiBaoCao.jsx =====
+import React, { useEffect, useState } from "react";
+import axios from "../services/api";
+
+function AdminLoaiBaoCao() {
+  const [list, setList] = useState([]);
+  const [form, setForm] = useState({ ten_loai: "", thoi_gian_bat_dau: "", han_gui: "", dinh_ky: 0 });
+  const [editId, setEditId] = useState(null);
+  const token = localStorage.getItem("token");
+
+  const load = async () => {
+    const res = await axios.get("/admin/loaibaocao", { headers: { Authorization: `Bearer ${token}` } });
+    setList(res.data);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const payload = { ...form };
+    if (editId) {
+      await axios.put(`/admin/loaibaocao/${editId}`, payload, { headers: { Authorization: `Bearer ${token}` } });
+    } else {
+      await axios.post("/admin/loaibaocao", payload, { headers: { Authorization: `Bearer ${token}` } });
+    }
+    setForm({ ten_loai: "", thoi_gian_bat_dau: "", han_gui: "", dinh_ky: 0 });
+    setEditId(null);
+    load();
+  };
+
+  const handleDelete = async (id) => {
+    if (window.confirm("Xoá?")) {
+      await axios.delete(`/admin/loaibaocao/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+      load();
+    }
+  };
+
+  return (
+    <div className="p-4">
+      <h2 className="text-xl font-bold mb-4">Quản lý loại báo cáo</h2>
+      <form onSubmit={handleSubmit} className="space-y-2">
+        <input value={form.ten_loai} onChange={e => setForm({ ...form, ten_loai: e.target.value })} placeholder="Tên loại" className="border px-2 py-1" required />
+        <input type="datetime-local" value={form.thoi_gian_bat_dau} onChange={e => setForm({ ...form, thoi_gian_bat_dau: e.target.value })} className="border px-2 py-1" required />
+        <input type="datetime-local" value={form.han_gui} onChange={e => setForm({ ...form, han_gui: e.target.value })} className="border px-2 py-1" required />
+        <input type="number" value={form.dinh_ky} onChange={e => setForm({ ...form, dinh_ky: parseInt(e.target.value) })} placeholder="Định kỳ" className="border px-2 py-1" />
+        <button type="submit" className="bg-blue-600 text-white px-4 py-1 rounded">{editId ? "Cập nhật" : "Tạo mới"}</button>
+      </form>
+      <table className="w-full mt-4 border">
+        <thead><tr><th>Tên</th><th>Bắt đầu</th><th>Hạn</th><th>Định kỳ</th><th>Hành động</th></tr></thead>
+        <tbody>
+          {list.map(item => (
+            <tr key={item.id} className="text-center border-t">
+              <td>{item.ten_loai}</td>
+              <td>{new Date(item.thoi_gian_bat_dau).toLocaleString()}</td>
+              <td>{new Date(item.han_gui).toLocaleString()}</td>
+              <td>{item.dinh_ky}</td>
+              <td>
+                <button onClick={() => { setEditId(item.id); setForm(item); }} className="text-blue-600 mr-2">Sửa</button>
+                <button onClick={() => handleDelete(item.id)} className="text-red-600">Xoá</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export default AdminLoaiBaoCao;
+
+
+===== FILE: frontend/src\pages\AdminYeuCauBaoCao.jsx =====
+import React, { useEffect, useState } from "react";
+import axios from "../services/api";
+
+function AdminYeuCauBaoCao() {
+  const [requests, setRequests] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [loaiBaoCao, setLoaiBaoCao] = useState([]);
+  const [form, setForm] = useState({ loai_baocao_id: "", user_ids: [], dinh_ky: 0 });
+  const [filter, setFilter] = useState({ loai_baocao_id: "", user_id: "" });
+  const token = localStorage.getItem("token");
+
+  const loadAll = async () => {
+    const [r1, r2, r3] = await Promise.all([
+      axios.get("/report/request", { headers: { Authorization: `Bearer ${token}` } }),
+      axios.get("/admin/user", { headers: { Authorization: `Bearer ${token}` } }),
+      axios.get("/admin/loaibaocao", { headers: { Authorization: `Bearer ${token}` } }),
+    ]);
+    setRequests(r1.data);
+    setUsers(r2.data);
+    setLoaiBaoCao(r3.data);
+  };
+
+  useEffect(() => { loadAll(); }, []);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    await axios.post("/report/request", form, { headers: { Authorization: `Bearer ${token}` } });
+    setForm({ loai_baocao_id: "", user_ids: [], dinh_ky: 0 });
+    loadAll();
+  };
+
+  const handleCheckbox = (id) => {
+    const ids = form.user_ids.includes(id) ? form.user_ids.filter(x => x !== id) : [...form.user_ids, id];
+    setForm({ ...form, user_ids: ids });
+  };
+
+  const filtered = requests.filter(r => {
+    return (
+      (!filter.loai_baocao_id || r.loai_baocao_id === parseInt(filter.loai_baocao_id)) &&
+      (!filter.user_id || r.user_ids.includes(parseInt(filter.user_id)))
+    );
+  });
+
+  const exportCSV = () => {
+    const headers = ["ID", "Loại báo cáo", "Chi nhánh", "Định kỳ"];
+    const rows = filtered.map(r => [
+      r.id,
+      r.loai_baocao_id,
+      r.user_ids.join("; "),
+      r.dinh_ky
+    ]);
+    const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "yeu_cau_baocao.csv";
+    link.click();
+  };
+
+  return (
+    <div className="p-4">
+      <h2 className="text-xl font-bold mb-4">Tạo yêu cầu báo cáo</h2>
+      <form onSubmit={handleSubmit} className="space-y-2">
+        <select value={form.loai_baocao_id} onChange={e => setForm({ ...form, loai_baocao_id: parseInt(e.target.value) })} className="border px-2 py-1">
+          <option value="">-- Chọn loại báo cáo --</option>
+          {loaiBaoCao.map(l => <option key={l.id} value={l.id}>{l.ten_loai}</option>)}
+        </select>
+        <div>
+          {users.map(u => (
+            <label key={u.id} className="inline-block mr-4">
+              <input type="checkbox" checked={form.user_ids.includes(u.id)} onChange={() => handleCheckbox(u.id)} />
+              <span className="ml-1">{u.ten_chi_nhanh}</span>
+            </label>
+          ))}
+        </div>
+        <input type="number" value={form.dinh_ky} onChange={e => setForm({ ...form, dinh_ky: parseInt(e.target.value) })} placeholder="Định kỳ" className="border px-2 py-1" />
+        <button type="submit" className="bg-blue-600 text-white px-4 py-1 rounded">Gửi yêu cầu</button>
+      </form>
+
+      <h3 className="text-lg font-bold mt-6 mb-2">Bộ lọc</h3>
+      <div className="space-x-2 mb-2">
+        <select value={filter.loai_baocao_id} onChange={e => setFilter({ ...filter, loai_baocao_id: e.target.value })} className="border px-2 py-1">
+          <option value="">-- Loại báo cáo --</option>
+          {loaiBaoCao.map(l => <option key={l.id} value={l.id}>{l.ten_loai}</option>)}
+        </select>
+        <select value={filter.user_id} onChange={e => setFilter({ ...filter, user_id: e.target.value })} className="border px-2 py-1">
+          <option value="">-- Chi nhánh --</option>
+          {users.map(u => <option key={u.id} value={u.id}>{u.ten_chi_nhanh}</option>)}
+        </select>
+        <button onClick={exportCSV} className="bg-green-600 text-white px-3 py-1 rounded">Export CSV</button>
+      </div>
+
+      <h3 className="text-lg font-bold mb-2">Danh sách yêu cầu</h3>
+      <table className="table-auto border w-full text-sm">
+        <thead><tr className="bg-gray-200"><th>ID</th><th>Loại báo cáo</th><th>Chi nhánh</th><th>Định kỳ</th></tr></thead>
+        <tbody>
+          {filtered.map(r => (
+            <tr key={r.id} className="border-t text-center">
+              <td>{r.id}</td>
+              <td>{r.loai_baocao_id}</td>
+              <td>{r.user_ids.join(", ")}</td>
+              <td>{r.dinh_ky}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export default AdminYeuCauBaoCao;
 
 
 ===== FILE: frontend/src\pages\LoginPage.jsx =====

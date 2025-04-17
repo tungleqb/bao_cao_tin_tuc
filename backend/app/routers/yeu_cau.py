@@ -8,6 +8,7 @@ from ..models.yeu_cau_baocao import YeuCauBaoCao
 from ..models.user import User
 from ..schemas.yeu_cau import YeuCauBaoCaoCreate
 from ..dependencies.auth import get_current_admin
+from ..crud.audit_log import log_action
 
 router = APIRouter()
 
@@ -25,6 +26,7 @@ async def create_request(data: YeuCauBaoCaoCreate, db: AsyncSession = Depends(ge
     )
     db.add(req)
     await db.commit()
+    await log_action(db, admin.id, "create", "YeuCauBaoCao", req.id, f"Tạo yêu cầu cho loại báo cáo ID {req.loai_baocao_id} tới {len(req.users)} chi nhánh")
     await db.refresh(req)
 
     result = await db.execute(
@@ -71,6 +73,7 @@ async def update_request(id: int, data: YeuCauBaoCaoCreate, db: AsyncSession = D
     req.dinh_ky = data.dinh_ky
 
     await db.commit()
+    await log_action(db, admin.id, "update", "YeuCauBaoCao", id, f"Cập nhật yêu cầu báo cáo ID {id}")
     await db.refresh(req)
 
     result = await db.execute(
@@ -95,4 +98,5 @@ async def delete_request(id: int, db: AsyncSession = Depends(get_db), admin=Depe
 
     await db.delete(req)
     await db.commit()
+    await log_action(db, admin.id, "delete", "YeuCauBaoCao", id, f"Xoá yêu cầu báo cáo ID {id}")
     return {"msg": "Đã xoá yêu cầu báo cáo"}
