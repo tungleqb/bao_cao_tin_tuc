@@ -1,17 +1,24 @@
-
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime
-from sqlalchemy.sql import func
+from sqlalchemy import Column, String, Integer, DateTime, Boolean, ForeignKey
+from sqlalchemy.orm import relationship
 from ..database import Base
 
 class Report(Base):
     __tablename__ = "reports"
 
-    id = Column(Integer, primary_key=True, index=True)
-    loai_baocao_id = Column(Integer, ForeignKey("loai_baocao.id"))
-    user_id = Column(Integer, ForeignKey("users.id"))
-    filename = Column(String)
-    filesize = Column(Integer)
-    has_event = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    is_late = Column(Boolean, default=False)
-    late_seconds = Column(Integer, default=0)
+    ID = Column(String, primary_key=True, index=True)
+    Sender = Column(String, nullable=False)
+    SendID = Column(Integer, nullable=False)
+    PeriodID = Column(String, ForeignKey("periods.ID"), nullable=False)
+    ReportTypeID = Column(String, nullable=False)
+    ReportPeriodName = Column(String, nullable=False)
+    Blake3sum = Column(String, nullable=False)
+    FilePath = Column(String, nullable=False)
+    FileName = Column(String, nullable=False)
+    OriFileName = Column(String, nullable=False)
+    FileSize = Column(Integer, nullable=False)
+    SentAt = Column(DateTime(timezone=True), nullable=False)
+    Comment = Column(String, nullable=True)
+    HasEvent = Column(Boolean, default=True)
+    LateSeconds = Column(Integer, default=0)
+
+    period = relationship("Period", back_populates="reports")

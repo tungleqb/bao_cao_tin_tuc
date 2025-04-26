@@ -1,0 +1,411 @@
+Có sự thay đổi về logic dự án.
+1. Mô tả dự án: 
+	Xây dựng website báo cáo tin tức, sự kiện diễn ra trong ngày, tuần, tháng, đột xuất (mới bổ sung) cho các đơn vị hành chính.
+	Mỗi đơn vị hành chính sẽ được quản trị viên cấp một tài khoản (gọi là tài khoản chi nhánh) để đăng nhập (không đổi).
+	Mỗi tài khoản chi nhánh sau khi đăng nhập sẽ chọn loại báo cáo. Các loại báo cáo gồm Báo cáo ngày, Báo cáo tuần, Báo cáo tháng, các báo cáo đột xuất (mới bổ sung).
+	(Mới) Cấu trúc các loại báo cáo như sau:
+        {
+            ID: #Có định dạng BCDOTXUAT_{số thứ tự tăng dành}
+            DateCreated: #Ví dụ: 00:00:00, 12/5/2025
+            Name: #Ví dụ: Báo cáo đột xuất
+            Period_ID: #Một trong các loại DAILY, WEEKLY, MONTHLY, NONE. Trong đó, DAILY là định kỳ theo ngày, WEEKLY là định kỳ theo tuần, MONTHLY định kỳ theo tháng, NONE không định kỳ.
+            ActiveOn: #Ngày trong tháng/tuần tự động kích hoạt kỳ báo cáo, nếu Period_ID là DAILY hoặc NONE thì sẽ là 0, ví dụ: 14 (tức là ngày 14 trong tháng)
+            DeactiveOn: #Ngày trong tháng/tuần tự động huỷ kích hoạt kỳ báo cáo, nếu Period_ID là DAILY hoặc NONE thì sẽ là 0, ví dụ: 15
+            ActiveAt: #Thời gian tự động kích hoạt kỳ báo cáo, ví dụ: 00:00:00  (Giờ, phút, giây theo máy chủ)
+            Deactive: #Thời gian huỷ tự động kích hoạt kỳ báo cáo, ví dụ: 00:00:00
+            StartOn: #Ngày trong tháng/tuần đúng hạn kỳ báo cáo, nếu Period_ID là DAILY hoặc NONE thì sẽ là 0, ví dụ: 14 
+            EndOn: #Ngày trong tháng/tuần đúng hạn kỳ báo cáo, nếu Period_ID là DAILY hoặc NONE thì sẽ là 0, ví dụ: 15
+            StartAt: #Thời gian bằt đầu đúng hạn gửi báo cáo theo yêu cầu, ví dụ: 12:00:00
+            EndAt: #Thời gian kết thúc đúng hạn gửi báo cáo, ví dụ: 16:00:00
+            FromOn: #Ngày trong tháng/tuần tự động kích hoạt kỳ báo cáo, nếu Period_ID là DAILY hoặc NONE thì sẽ là 0, ví dụ: 14
+            ToOn: #Ngày trong tháng/tuần tự động huỷ kích hoạt kỳ báo cáo, nếu Period_ID là DAILY hoặc NONE thì sẽ là 0, ví dụ: 15
+            From: #Thời gian bắt đầu lấy số liệu đưa vào báo cáo, ví dụ: 00:00:00
+            To: #Thời gian kết thúc lấy số liệu đưa vào báo cáo, ví dụ: 23:59:59
+            DocExtList: #Danh sách các đuôi mở rộng được phép gửi, mặc định .doc .docx .pdf .bm2 .jpg .xlsx .xls
+            MaxSize: #Kích thước file gửi báo cáo không quá giá trị này, mặc định 100MB
+            NextAt: #Thời gian tiếp theo để chương trình tự động kiểm tra kích hoạt hoặc huỷ kích hoạt
+        }
+        Ví dụ về đối tượng Loại báo cáo (thường dùng)
+        Loại báo cáo ngày
+        {
+            ID: BCNGAY
+            DateCreated: 00:00:00 12/4/2025
+            Name: Báo cáo ngày
+            Period_ID: DAILY
+            ActiveOn: 0
+            DeactiveOn: 0
+            ActiveAt: 00:00:00
+            Deactive: 23: 59: 59
+            StartOn: 0
+            EndOn: 0
+            StartAt: 12: 00: 00
+            EndAt: 14: 00: 00
+            FromOn: 0
+            ToOn: 0
+            From: 00: 00: 00
+            To: 23:59:59
+            DocExtList: .doc .docx .pdf .bm2 .jpg .xlsx .xls
+            MaxSize: 100MB
+            NextAt: 23: 59: 59 24/4/2025
+        }
+        Loại báo cáo tuần
+        {
+            ID: BCTUAN
+            DateCreated: 00:00:00 12/4/2025
+            Name: Báo cáo tuần
+            Period_ID: WEEKLY
+            ActiveOn: 
+            DeactiveOn: 5
+            ActiveAt: 00:00:00
+            Deactive: 12: 00: 00
+            StartOn: 4
+            EndOn: 4
+            StartAt: 12: 00: 00
+            EndAt: 16: 00: 00
+            FromOn: 4
+            ToOn: 4
+            From: 00: 00: 00
+            To: 23:59:59
+            DocExtList: .doc .docx .pdf .bm2 .jpg .xlsx .xls
+            MaxSize: 100MB
+            NextAt: 23: 59: 59 24/4/2025
+        }
+        Mỗi khi đến thời điểm ActiveAt thì hệ thống sẽ tự động tạo ra một Kỳ báo cáo cho loại báo cáo đó. Kỳ báo cáo có định dạng:
+        {
+            TYPE: <ID của loại báo cáo>
+            ID: <ID của loại báo cáo xác định ở TYPE>_<ActiveAt của loại báo cáo>.
+            Name: <Name của loại báo cáo>_<thời gian của Kỳ báo cáo> (thời gian của kỳ báo cáo tuỳ thuộc loại báo cáo: đối với loại báo cáo ngày có dạng <dd/mm/yyyy> là ngày tháng năm của StartAt.
+             đối với loại báo cáo tuần hoặc báo cáo đột xuất có dạng <từ From đến To>; đối với loại báo cáo tháng có dạng <mm/yyyy> là tháng của StartAt).
+            ActiveAt: <ActiveAt của loại báo cáo> (Thời gian bắt đầu hiển thị và cho phép chi nhánh gửi báo cáo)
+            UnactiveAt: (Thời gian kết thúc hiển thị và ngừng cho phép chi nhánh gửi báo cáo)
+            From: dd/mm/yyyy (tính theo From của Loại báo cáo đột xuất; nếu Báo cáo ngày thì là ngày, tháng, năm của ActiveAt, nếu báo cáo tuần thì ngày tháng năm của UnactiveAt - 7 ngày)
+            To: dd/mm/yyyy (tính theo To của Loại báo cáo đột xuất; nếu Báo cáo ngày thì là ngày, tháng, năm của ActiveAt, nếu báo cáo tuần thì ngày tháng năm của UnactiveAt)
+            StartAt: Bắt đầu đúng hạn
+            EndAt: Kết thúc đúng hạn
+            Killer: <Auto or Admin> (Ai là người kết thúc Kỳ báo cáo)
+            Status: (Trạng thái đang sống hay đã bị Kill)
+            Reports: (danh sách các Báo cáo đã nhận được từ cách chi nhánh (nếu chi nhánh gửi nhiều lần thì chỉ ghi nhận cái sau cùng))
+            FolderPath: (Đường dẫn thư mục lưu trữ file đính kèm báo cáo của các chi nhánh)
+        }
+        Báo cáo có định dạng:
+        {
+            Sender: (tên tài khoản gửi báo cáo)
+            ID: <tên tài khoản gửi>_<ID của kỳ báo cáo>_<giờ, phút, giây gửi>
+            Period_ID: (ID của kỳ báo cáo)
+            ReportTypeID: BCNGAY
+            ReportPeriodName: "Báo cáo ngày 20/4/2025"
+            Blake3sum: (Blake3 checksum của file đính kèm)
+            FilePath: <đường dẫn file đính kèm được lưu trên máy chủ>
+            FileName: (tên file đã lưu có dạng <tên chi nhánh viết liền không dấu>_<Period_ID>)
+            OriFileName: (tên file gốc khi upload lên)
+            FileSize: (Kích thước file)
+            SentAt: (Thời gian gửi báo cáo)
+            Comment: (Nội dung lời nhắn)
+            HasEvent: (có sự kiện đáng chú ý hay không)
+            LateSeconds: (số giây bị trễ so với đúng hạn, số âm là gửi sớm hơn StartAt của loại báo cáo, số dương là quá thời gian đúng hạn, trong khoảng thời gian đúng hạn là 0)
+        }
+        Tài khoản chi nhánh có định dạng:
+        {
+            ID: (Theo số thứ tự)
+            Account: (tên đăng nhập không dấu)
+            Password: (Mã hoá)
+            Name: (Tên chi nhánh)
+            TimeCreated: (Thời gian tạo)
+            Avatar: (tên file avatar trên server)
+            Level: (Cấp chi nhánh gồm CAPPHONG/CAPXA)
+            IsAdmin: false
+        }
+        Tài khoản admin:
+        {
+            ID: 0
+            Account: admin
+            Password: (Mã hoá)
+            Name: Quản trị viên
+            TimeCreated: (Thời gian tạo)
+            Avatar: (tên file avatar trên server)
+            Level: CAPPHONG
+            IsAdmin: true
+        }
+    Phần backend:
+        Tạo bảng Các loại báo cáo;
+        Tạo bảng Kỳ báo cáo;
+        Tạo bảng Báo cáo;
+        Tạo bảng user;
+        Tạo router cho CRUD của tất cả các bảng;
+        Ghi và lưu trữ nhật ký thao tác của tài khoản Admin
+        Ghi và lưu trữ nhật ký các gửi báo cáo của tài khoản chi nhánh.
+        Chú ý đặt tên tất cả các biến, tên bảng bằng tiếng Anh.
+    Phần frontend sẽ được cung cấp file figma chi tiết, cụ thể.
+    Logic được mô tả sơ lược như sau:
+        Phần frontend của tài khoản chi nhánh như sau:
+            Trang đăng nhập{
+                Mô tả:{
+                    - input nhập tên đăng nhập (có nhãn "Tên tài khoản:")
+                    - input nhập mất khẩu (có nhãn "Mật khẩu:")
+                    - Nút đăng nhập
+                    - Checkbox ghi nhớ đăng nhập.
+                    }
+                Xử lý logic như các trang đăng nhập bình thường, chú ý tự động đăng nhập nếu có ghi nhớ.  
+            }
+            Trang cá nhân{
+                Mô tả:{
+                    - Phía trên bên trái và giữa là tên và logo phần mềm "Hệ thống gửi báo cáo" có kích thước phù hợp.
+                    - Góc trên bên phải là menu thông tin tài khoản (kiểu tương tự zimbra mail) gồm Tên chi nhánh luôn được hiển thị và có nút tam giác để người dùng bấm vào thì danh sách sổ xuống gồm Tên chi nhánh, tên đăng nhập, đổi mật khẩu, nhật ký gửi báo cáo.
+                    Người dùng click vào đổi mật khẩu thì sẽ hiển ra giao diện đổi mật khẩu trong vùng nội dung của trang (vùng chiếm phần lớn của trang web)
+                    Người dùng click vào Xem nhật ký báo cáo thì hiển thị bảng các báo cáo đã gửi (có thể xem nhiều báo cáo của cùng một kỳ nếu gửi nhiều lần), có thể lọc và phân trang nếu nhật ký dài. 
+                    - Phía bên trái (khoảng 1/5 màn hình) là danh sách các kỳ báo cáo đang kích hoạt của tài khoản, sắp xếp theo thời hạn còn lại. Thông tin của mỗi kỳ gồm Tên kỳ báo cáo và thời gian bắt đầu - thời gian hết hạn báo cáo (đúng hạn).
+                    Người dùng click vào Kỳ báo cáo nào thì giao diện gửi báo cáo của kỳ báo cáo đó sẽ được hiển thị ở vùng nội dung. 
+                    Giao diện báo cáo như sau:{
+                        Tên kỳ báo cáo
+                        Tên đơn vị báo cáo
+                        Tên loại báo cáo
+                        Thời gian hiện tại
+                    }
+                }
+            }
+        Phần frontend của tài khoản quản trị:
+            Đăng nhập
+            Quản trị
+                Tổng hợp báo cáo
+                Quản lý tài khoản
+                Quản lý Kỳ báo cáo
+                Quản lý Báo cáo
+                Quản lý các loại báo cáo
+                Nhật ký thao tác
+            Nội dung của Tổng hợp báo cáo
+                Phần chọn Kỳ báo cáo trong group ChonKybaocao:
+                    ListBox Chọn Loại báo cáo
+                    ListBox Chọn Tên Kỳ báo cáo
+                    Thông tin của Kỳ báo cáo đang chọn dạng label gồm {
+                        Tên kỳ báo cáo
+                        Bắt đầu
+                        Kết thúc
+                        Trạng thái
+                        Số lượng báo cáo
+                        FolderPath
+                    }
+                Phần hiển thị bảng thống kê Kỳ báo cáo trong group Thongkebaocao:
+                    Bảng thống kê gồm các cột sau: {
+                        Tên đơn vị
+                        Tên Kỳ báo cáo
+                        Blake3sum
+                        FileName
+                        OriFileName
+                        Thời gian gửi
+                        Comment
+                        Có sự kiện
+                        Thời hạn
+                    }
+                    Nút Xuất file excel
+                    Phân theo trang mỗi trang 50 dòng
+                    Cho phép lọc, tìm kiếm theo cột
+            Nội dung của Quản lý tài khoản:
+                Tạo mới tài khoản trong một nhóm taomoi gồm các nhãn và Textbox sau: {
+                    Tiêu đề TẠO TÀI KHOẢN MỚI
+                    Tên đăng nhập
+                    Mật khẩu
+                    Tên chi nhánh
+                    Cấp chi nhánh: RadioBox {Cấp phòng, Cấp xã}
+                    Nút Tạo tài khoản
+                }
+                Bảng thống kê các tài khoản gom thành group bangthongke gồm các cột sau:{
+                    Tên đăng nhập
+                    Tên chi nhánh
+                    Cấp chi nhánh
+                    Thời gian tạo
+                    Cột điều khiển gồm các nút (Sửa, Xoá, Đặt lại mật khẩu)
+                }
+                Bảng thống kê có chức năng lọc/tìm kiếm theo cột (tương tự excel) gom thành nhóm từng cột, nhóm của toàn bảng
+                Phân trang tương tự Bảng thông kê báo cáo có nút Trước, sau, nhập trang và nút go để đi đến trang, tổng số trang.
+                Popup giao diện Sửa tên gom thành group suaten gồm:{
+                    Tiêu đề Popup với tên ĐỔI TÊN CHI NHANH
+                    Nhãn hiển thị tên chi nhánh cũ
+                    Nhãn và textbox Tên chi nhánh mới
+                    Nút Đổi tên
+                    Nút Huỷ
+                }, 
+                Popup Xác nhận xoá tài khoản gom thành group xacnhanxoa{
+                    Nhãn "Bạn có chắc chắn xoá tài khoản <tên đăng nhập> không?
+                    Nút Xoá và Nút Không xoá
+                },
+                Popup Đặt lại mật khẩu gom thành group datlaimatkhau{
+                    Nhãn "Đặt lại mật khẩu cho tài khoản <tên đăng nhập>"?
+                    Nhãn và textbox Mật khẩu mới
+                    Nhãn và textbox Xác nhận mật khẩu
+                    Nút Đặt lại
+                    Nút Huỷ
+                }
+            Nội dung của Quản lý Kỳ báo cáo:
+                Tạo Kỳ báo cáo gom thành group Taokybaocao gồm các control sau: {
+                    Tiêu đề "TẠO KỲ BÁO CÁO"
+                    Nhãn "Loại báo cáo:", ListBox để hiển thị danh sách các loại báo cáo có sẵn
+                    Nhãn "Tên kỳ báo cáo:", Textbox (Không cho phép nhập, tự động tạo tên) 
+                    Nhãn "Được phép gửi từ", Control nhập ngày tháng năm, giờ phút giây, Nhãn "đến" Control nhập ngày tháng năm, giờ phút giây
+                    Nhãn "Thời gian yêu cầu gửi từ", Control nhập ngày tháng năm, giờ phút giây, Nhãn "đến", Control nhập ngày tháng năm, giờ phút giây
+                    Nhãn "Thời gian lấy số liệu từ", Control nhập ngày tháng năm, giờ phút giây, Nhãn "đến", Control nhập ngày tháng năm, giờ phút giây
+                    Nút "Tạo Kỳ báo cáo"
+                }
+                Bảng thống kê các Kỳ báo cáo gom thành group bangthongke gồm các cột sau: {
+                    Loại báo cáo
+                    Tên kỳ báo cáo
+                    Active
+                    UnActive
+                    StartAt
+                    EndAt
+                    From
+                    To
+                    Thời gian tạo
+                    Trạng thái
+                    Báo cáo
+                    Có sự kiện
+                    Menu điều khiển gồm các menuitem {Chi tiết, Kích hoạt lại, Bỏ kích hoạt, Sửa, Xoá, Tổng hợp}
+                }
+                Bảng thống kê có chức năng lọc/tìm kiếm theo cột (tương tự excel) gom thành nhóm từng cột, nhóm của toàn bảng
+                Phân trang tương tự Bảng thông kê báo cáo có nút Trước, sau, nhập trang và nút go để đi đến trang, tổng số trang.
+                Popup giao diện Chi tiết tên gom thành group chitiet gồm:{
+                    Tiêu đề Popup với tên <Tên Kỳ báo cáo>
+                    Nhãn hiển thị loại báo cáo
+                    Nhãn "Được phép gửi từ" <ngày tháng năm, giờ phút giây> "đến" <ngày tháng năm, giờ phút giây>
+                    Nhãn "Thời gian yêu cầu gửi từ" <ngày tháng năm, giờ phút giây> "đến" <ngày tháng năm, giờ phút giây>
+                    Nhãn "Thời gian lấy số liệu từ"<ngày tháng năm, giờ phút giây> "đến" <ngày tháng năm, giờ phút giây>
+                    Nhãn hiển thị thời gian sửa lần cuối
+                    Nhãn hiển thị trạng thái
+                    Nhãn hiển thị số lượng báo cáo
+                    Nhãn hiển thị số lượng báo cáo có sự kiện
+                    Nút "Đóng"
+                },
+                Popup Xác nhận Kích hoạt gom thành group xacnhankichhoat{
+                    Nhãn "Bạn có chắc chắn kích hoạt <tên kỳ báo cáo> không?
+                    Nhãn "Khi kích hoạt kỳ báo cáo sẽ được hiển thị và tài khoản báo cáo có thể gửi"
+                    Nút "Áp dụng" và Nút "Đóng"
+                },
+                Popup Xác nhận Huỷ kích hoạt gom thành group xacnhanhuykichhoat{
+                    Nhãn "Bạn có chắc chắn huỷ kích hoạt <tên kỳ báo cáo> không?
+                    Nhãn "Khi huỷ kích hoạt kỳ báo cáo sẽ không được hiển thị và tài khoản báo cáo không thể gửi"
+                    Nút "Áp dụng" và Nút "Đóng"
+                },
+                Popup giao diện Sửa tên gom thành group suakybaocao gồm:{
+                    Tiêu đề Popup với tên <Tên Kỳ báo cáo>
+                    Nhãn "Loại báo cáo:", ListBox để hiển thị danh sách các loại báo cáo có sẵn
+                    Nhãn "Tên kỳ báo cáo:", Textbox (Không cho phép nhập, tự động tạo tên) 
+                    Nhãn "Được phép gửi từ", Control nhập ngày tháng năm, giờ phút giây, Nhãn "đến" Control nhập ngày tháng năm, giờ phút giây
+                    Nhãn "Thời gian yêu cầu gửi từ", Control nhập ngày tháng năm, giờ phút giây, Nhãn "đến", Control nhập ngày tháng năm, giờ phút giây
+                    Nhãn "Thời gian lấy số liệu từ", Control nhập ngày tháng năm, giờ phút giây, Nhãn "đến", Control nhập ngày tháng năm, giờ phút giây
+                    Nhãn hiển thị thời gian sửa lần cuối
+                    Nhãn hiển thị trạng thái
+                    Nhãn hiển thị số lượng báo cáo
+                    Nhãn hiển thị số lượng báo cáo có sự kiện
+                    Nút "Áp dụng", Nút "Đóng"
+                }, 
+                Popup Xác nhận xoá tài khoản gom thành group xacnhanxoa{
+                    Nhãn "Bạn có chắc chắn xoá <tên kỳ báo cáo> không?
+                    Nút Xoá và Nút Không xoá
+                }
+            Nội dung của Quản lý loại báo cáo:
+                Tạo Loại báo cáo gom thành group Taoloaibaocao gồm các control sau: {
+                    Tiêu đề "TẠO LOẠI BÁO CÁO"
+                    Nhãn "Tên loại báo cáo:", Textbox để nhập tên
+                    Nhãn "Tự động kích hoạt kỳ báo cáo lúc:", 
+                        frame định kỳ dạng RadioBox có cấu trúc {
+                        Nhãn "Theo giờ trong ngày:", Control chọn giờ phút giây
+                        Nhãn "Theo thứ trong tuần:", Listbox chọn thứ trong tuần, Control chọn giờ phút giây mặc định 00: 00: 00
+                        Nhãn "Theo ngày trong tháng:", Listbox chọn ngày trong tháng, Control chọn giờ phút giây mặc định 00: 00: 00
+                        Nhãn "Một lần:", Control chọn ngày tháng năm giờ phút giây
+                        }
+                    Nhãn "Tự động huỷ kích hoạt kỳ báo cáo lúc:",
+                        frame định kỳ dạng RadioBox có cấu trúc {
+                        Nhãn "Theo giờ trong ngày:", Control chọn giờ phút giây
+                        Nhãn "Theo thứ trong tuần:", Listbox chọn thứ trong tuần, Control chọn giờ phút giây mặc định 00: 00: 00
+                        Nhãn "Theo ngày trong tháng:", Listbox chọn ngày trong tháng, Control chọn giờ phút giây mặc định 00: 00: 00
+                        Nhãn "Một lần:", Control chọn ngày tháng năm giờ phút giây
+                        }
+                    Nhãn "Hạn báo cáo từ:", 
+                        frame định kỳ dạng RadioBox có cấu trúc {
+                        Nhãn "Theo giờ trong ngày:", Control chọn giờ phút giây
+                        Nhãn "Theo thứ trong tuần:", Listbox chọn thứ trong tuần, Control chọn giờ phút giây mặc định 00: 00: 00
+                        Nhãn "Theo ngày trong tháng:", Listbox chọn ngày trong tháng, Control chọn giờ phút giây mặc định 00: 00: 00
+                        Nhãn "Một lần:", Control chọn ngày tháng năm giờ phút giây
+                        }
+                    Nhãn "Hạn báo cáo đến:",
+                        frame định kỳ dạng RadioBox có cấu trúc {
+                        Nhãn "Theo giờ trong ngày:", Control chọn giờ phút giây
+                        Nhãn "Theo thứ trong tuần:", Listbox chọn thứ trong tuần, Control chọn giờ phút giây mặc định 00: 00: 00
+                        Nhãn "Theo ngày trong tháng:", Listbox chọn ngày trong tháng, Control chọn giờ phút giây mặc định 00: 00: 00
+                        Nhãn "Một lần:", Control chọn ngày tháng năm giờ phút giây
+                        }
+                    Nhãn "Số liệu báo cáo từ:", 
+                        frame định kỳ dạng RadioBox có cấu trúc {
+                        Nhãn "Theo giờ trong ngày:", Control chọn giờ phút giây
+                        Nhãn "Theo thứ trong tuần:", Listbox chọn thứ trong tuần, Control chọn giờ phút giây mặc định 00: 00: 00
+                        Nhãn "Theo ngày trong tháng:", Listbox chọn ngày trong tháng, Control chọn giờ phút giây mặc định 00: 00: 00
+                        Nhãn "Một lần:", Control chọn ngày tháng năm giờ phút giây
+                        }
+                    Nhãn "Số liệu báo cáo đến:",
+                        frame định kỳ dạng RadioBox có cấu trúc {
+                        Nhãn "Theo giờ trong ngày:", Control chọn giờ phút giây
+                        Nhãn "Theo thứ trong tuần:", Listbox chọn thứ trong tuần, Control chọn giờ phút giây mặc định 00: 00: 00
+                        Nhãn "Theo ngày trong tháng:", Listbox chọn ngày trong tháng, Control chọn giờ phút giây mặc định 00: 00: 00
+                        Nhãn "Một lần:", Control chọn ngày tháng năm giờ phút giây
+                        }
+                    Checkbox, Nhãn "Tự động kích hoạt"
+                    Nhãn "Danh sách các loại file báo cáo:", Textbox với giá trị mặc định ".doc .docx .pdf .bm2 .jpg .xlsx .xls"
+                    Nhãn "Giới hạn kích thước file", Textbox với giá trị mặc định 100MB
+                    Nút "Tạo Loại báo cáo"
+                }
+                Bảng thống kê các Kỳ báo cáo gom thành group bangthongke gồm các cột sau: {
+                    Loại báo cáo
+                    Tên kỳ báo cáo
+                    Active
+                    UnActive
+                    StartAt
+                    EndAt
+                    From
+                    To
+                    Thời gian tạo
+                    Trạng thái
+                    Báo cáo
+                    Có sự kiện
+                    Menu điều khiển gồm các menuitem {Chi tiết, Kích hoạt lại, Bỏ kích hoạt, Sửa, Xoá, Tổng hợp}
+                }
+                Bảng thống kê có chức năng lọc/tìm kiếm theo cột (tương tự excel) gom thành nhóm từng cột, nhóm của toàn bảng
+                Phân trang tương tự Bảng thông kê báo cáo có nút Trước, sau, nhập trang và nút go để đi đến trang, tổng số trang.
+                Popup giao diện Chi tiết tên gom thành group chitiet gồm:{
+                    Tiêu đề Popup với tên <Tên Kỳ báo cáo>
+                    Nhãn hiển thị loại báo cáo
+                    Nhãn "Được phép gửi từ" <ngày tháng năm, giờ phút giây> "đến" <ngày tháng năm, giờ phút giây>
+                    Nhãn "Thời gian yêu cầu gửi từ" <ngày tháng năm, giờ phút giây> "đến" <ngày tháng năm, giờ phút giây>
+                    Nhãn "Thời gian lấy số liệu từ"<ngày tháng năm, giờ phút giây> "đến" <ngày tháng năm, giờ phút giây>
+                    Nhãn hiển thị thời gian sửa lần cuối
+                    Nhãn hiển thị trạng thái
+                    Nhãn hiển thị số lượng báo cáo
+                    Nhãn hiển thị số lượng báo cáo có sự kiện
+                    Nút "Đóng"
+                },
+                Popup Xác nhận Kích hoạt gom thành group xacnhankichhoat{
+                    Nhãn "Bạn có chắc chắn kích hoạt <tên kỳ báo cáo> không?
+                    Nhãn "Khi kích hoạt kỳ báo cáo sẽ được hiển thị và tài khoản báo cáo có thể gửi"
+                    Nút "Áp dụng" và Nút "Đóng"
+                },
+                Popup Xác nhận Huỷ kích hoạt gom thành group xacnhanhuykichhoat{
+                    Nhãn "Bạn có chắc chắn huỷ kích hoạt <tên kỳ báo cáo> không?
+                    Nhãn "Khi huỷ kích hoạt kỳ báo cáo sẽ không được hiển thị và tài khoản báo cáo không thể gửi"
+                    Nút "Áp dụng" và Nút "Đóng"
+                },
+                Popup giao diện Sửa tên gom thành group suakybaocao gồm:{
+                    Tiêu đề Popup với tên <Tên Kỳ báo cáo>
+                    Nhãn "Loại báo cáo:", ListBox để hiển thị danh sách các loại báo cáo có sẵn
+                    Nhãn "Tên kỳ báo cáo:", Textbox (Không cho phép nhập, tự động tạo tên) 
+                    Nhãn "Được phép gửi từ", Control nhập ngày tháng năm, giờ phút giây, Nhãn "đến" Control nhập ngày tháng năm, giờ phút giây
+                    Nhãn "Thời gian yêu cầu gửi từ", Control nhập ngày tháng năm, giờ phút giây, Nhãn "đến", Control nhập ngày tháng năm, giờ phút giây
+                    Nhãn "Thời gian lấy số liệu từ", Control nhập ngày tháng năm, giờ phút giây, Nhãn "đến", Control nhập ngày tháng năm, giờ phút giây
+                    Nhãn hiển thị thời gian sửa lần cuối
+                    Nhãn hiển thị trạng thái
+                    Nhãn hiển thị số lượng báo cáo
+                    Nhãn hiển thị số lượng báo cáo có sự kiện
+                    Nút "Áp dụng", Nút "Đóng"
+                }, 
+                Popup Xác nhận xoá tài khoản gom thành group xacnhanxoa{
+                    Nhãn "Bạn có chắc chắn xoá <tên kỳ báo cáo> không?
+                    Nút Xoá và Nút Không xoá
+                }
+Sẽ cập nhật chi tiết và hoàn chỉnh hơn.

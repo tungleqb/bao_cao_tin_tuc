@@ -42,6 +42,202 @@ formatter = generic
 format = %(levelname)-5.5s [%(name)s] %(message)s
 datefmt = %H:%M:%S
 
+===== FILE: backend/promts.txt =====
+Có sự thay đổi về logic dự án.
+1. Mô tả dự án: 
+	Xây dựng website báo cáo tin tức, sự kiện diễn ra trong ngày, tuần, tháng, đột xuất (mới bổ sung) cho các đơn vị hành chính.
+	Mỗi đơn vị hành chính sẽ được quản trị viên cấp một tài khoản (gọi là tài khoản chi nhánh) để đăng nhập (không đổi).
+	Mỗi tài khoản chi nhánh sau khi đăng nhập sẽ chọn loại báo cáo. Các loại báo cáo gồm Báo cáo ngày, Báo cáo tuần, Báo cáo tháng, các báo cáo đột xuất (mới bổ sung).
+	(Mới) Cấu trúc các loại báo cáo như sau:
+        Nhóm Báo cáo định kỳ:
+            Báo cáo ngày dạng:
+                {
+                    ID: BCNGAY 
+                    Name: Báo cáo ngày
+                    ActiveAt: 00:00:00 (Giờ, phút , giây theo máy chủ)
+                    DeactiveAfter: 24:00:00 (24 giờ)
+                    StartAt: 12:00:00 (Bắt đầu nhận báo cáo đúng hạn - Giờ, phút , giây theo máy chủ)
+                    EndAfter: 2:00:00 (Kết thúc thời gian nhận đúng hạn lúc StartAt + EndAfter)
+                    From: None (phục vụ cho loại báo cáo đột xuất)
+                    To: None (phục vụ cho loại báo cáo đột xuất)
+                    DocExtList: .doc .docx .pdf .bm2 .jpg .xlsx .xls
+                    MaxSize: 100MB
+                    Active: True
+                },
+            Báo cáo tuần:
+                {
+                    ID: BCTUAN
+                    Name: Báo cáo tuần
+                    ActiveAt: 12:00:00, Thứ 4 (Giờ, phút, giây và thứ trong tuần theo máy chủ)
+                    DeactiveAfter: 24:00:00 (24 giờ)
+                    StartAt: 12:00:00, Thứ 4 (Bắt đầu nhận báo cáo đúng hạn - Giờ, phút , giây và thứ trong tuần theo máy chủ)
+                    EndAfter: 24:00:00 (Kết thúc thời gian nhận đúng hạn lúc StartAt + EndAfter)
+                    From: None (phục vụ cho loại báo cáo đột xuất)
+                    To: None (phục vụ cho loại báo cáo đột xuất)
+                    DocExtList: .doc .docx .pdf .bm2 .jpg .xlsx .xls
+                    MaxSize: 100MB
+                    Active: True
+                },
+            Báo cáo tháng:
+                {
+                    ID: BCTHANG
+                    Name: Báo cáo tháng
+                    ActiveAt: 00:00:00, 15th (Giờ, phút, giây và ngày trong tháng theo máy chủ)
+                    DeactiveAfter: 24:00:00 (24 giờ)
+                    StartAt: 00:00:00, 15th (Bắt đầu nhận báo cáo đúng hạn - Giờ, phút , giây và ngày trong tháng theo máy chủ)
+                    EndAfter: 24:00:00 (Kết thúc thời gian nhận đúng hạn lúc StartAt + EndAfter)
+                    From: None (phục vụ cho loại báo cáo đột xuất)
+                    To: None (phục vụ cho loại báo cáo đột xuất)
+                    DocExtList: .doc .docx .pdf .bm2 .jpg .xlsx .xls
+                    MaxSize: 100MB
+                    Active: True
+                },
+        Nhóm Báo cáo đột xuất:
+            {
+                ID: BCDOTXUAT_{số thứ tự tăng dành}
+                Name: Báo cáo đột xuất số 123
+                ActiveAt: 00:00:00, 12/5/2025 (Giờ, phút, giây và ngày tháng năm theo máy chủ)
+                DeactiveAfter: 24:00:00 (24 giờ)
+                StartAt: 00:00:00, 12/5/2025 (Bắt đầu nhận báo cáo đúng hạn - Giờ, phút , giây và ngày trong tháng theo máy chủ)
+                EndAfter: 24:00:00 (Kết thúc thời gian nhận đúng hạn lúc StartAt + EndAfter)
+                From: dd/mm/yyyy (thời gian bắt đầu thống kê để báo cáo)
+                To: dd/mm/yyyy (thời gian kết thúc thống kê để báo cáo)
+                DocExtList: .doc .docx .pdf .bm2 .jpg .xlsx .xls
+                MaxSize: 100MB
+                Active: False
+            }
+        Trong đó, thuộc tính ID: là mã định danh của loại báo cáo;
+            Name là tên của loại báo cáo;
+            ActiveAt là thời điểm kích hoạt để tạo Kỳ báo cáo mới, khi được kích hoạt, các tài khoản chi nhánh sẽ được hiển thị Kỳ báo cáo này trên trang cá nhân và có thể gửi báo cáo; 
+            DeactiveAfter là khoảng thời gian kể từ khi ActiveAt thì Kỳ báo cáo sẽ tự động bỏ kích hoạt, khi bị không kích hoạt các tài khoản chi nhánh không hiển thị Kỳ báo cáo và không thể gửi báo cáo;
+            StartAt là mốc thời gian bắt đầu tính đúng hạn gửi báo cáo;
+            EndAfter là khoảng thời gian kể từ khi StartAt, mốc thời gian kết thúc tính đúng hạn gửi báo cáo là StartAt + EndAfter. Các số cụ thể sẽ liên quan đến Kỳ báo cáo;
+            From làm mốc thời gian bắt đầu thống kê để báo cáo;
+            To làm mốc thời gian kết thúc thống kê để báo cáo;
+            DocExtList là danh sách các định dạng hợp lệ để đính kèm file gửi báo cáo, cách nhau bởi dấu cách;
+            MaxSize là kích thước tối đa của file đính kèm;
+            Active là trạng thái cho biết loại báo cáo còn có khả năng sẽ được tự động kích hoạt trong tương lai.
+
+        Mỗi khi đến thời điểm ActiveAt thì hệ thống sẽ tự động tạo ra một Kỳ báo cáo cho loại báo cáo đó. Kỳ báo cáo có định dạng:
+        {
+            TYPE: <ID của loại báo cáo>
+            ID: <ID của loại báo cáo xác định ở TYPE>_<ActiveAt của loại báo cáo>.
+            Name: <Name của loại báo cáo>_<thời gian của Kỳ báo cáo> (thời gian của kỳ báo cáo tuỳ thuộc loại báo cáo: đối với loại báo cáo ngày có dạng <dd/mm/yyyy> là ngày tháng năm của StartAt.
+             đối với loại báo cáo tuần hoặc báo cáo đột xuất có dạng <từ From đến To>; đối với loại báo cáo tháng có dạng <mm/yyyy> là tháng của StartAt).
+            StartAt: <ActiveAt của loại báo cáo> (Thời gian bắt đầu hiển thị và cho phép chi nhánh gửi báo cáo)
+            EndAt: (Thời gian kết thúc hiển thị và ngừng cho phép chi nhánh gửi báo cáo)
+            From: dd/mm/yyyy (tính theo From của Loại báo cáo đột xuất; nếu Báo cáo ngày thì là ngày, tháng, năm của StartAt, nếu báo cáo tuần thì ngày tháng năm của EndAt - 7 ngày)
+            To: dd/mm/yyyy (tính theo To của Loại báo cáo đột xuất; nếu Báo cáo ngày thì là ngày, tháng, năm của StartAt, nếu báo cáo tuần thì ngày tháng năm của EndAt)
+            Killer: <Auto or Admin> (Ai là người kết thúc Kỳ báo cáo)
+            Status: (Trạng thái đang sống hay đã bị Kill)
+            Reports: (danh sách các Báo cáo đã nhận được từ cách chi nhánh (nếu chi nhánh gửi nhiều lần thì chỉ ghi nhận cái sau cùng))
+            FolderPath: (Đường dẫn thư mục lưu trữ file đính kèm báo cáo của các chi nhánh)
+        }
+        Báo cáo có định dạng:
+        {
+            Sender: (tên tài khoản gửi báo cáo)
+            ID: <tên tài khoản gửi>_<ID của kỳ báo cáo>_<giờ, phút, giây gửi>
+            Period_ID: (ID của kỳ báo cáo)
+            ReportTypeID: BCNGAY
+            ReportPeriodName: "Báo cáo ngày 20/4/2025"
+            Blake3sum: (Blake3 checksum của file đính kèm)
+            FilePath: <đường dẫn file đính kèm được lưu trên máy chủ>
+            FileName: (tên file đã lưu có dạng <tên chi nhánh viết liền không dấu>_<Period_ID>)
+            OriFileName: (tên file gốc khi upload lên)
+            FileSize: (Kích thước file)
+            SentAt: (Thời gian gửi báo cáo)
+            Comment: (Nội dung lời nhắn)
+            HasEvent: (có sự kiện đáng chú ý hay không)
+            LateSeconds: (số giây bị trễ so với đúng hạn, số âm là gửi sớm hơn StartAt của loại báo cáo, số dương là quá thời gian đúng hạn, trong khoảng thời gian đúng hạn là 0)
+        }
+        Tài khoản chi nhánh có định dạng:
+        {
+            ID: (Theo số thứ tự)
+            Account: (tên đăng nhập không dấu)
+            Password: (Mã hoá)
+            Name: (Tên chi nhánh)
+            TimeCreated: (Thời gian tạo)
+            Avatar: (tên file avatar trên server)
+            Level: (Cấp chi nhánh gồm CAPPHONG/CAPXA)
+            IsAdmin: false
+        }
+        Tài khoản admin:
+        {
+            ID: 0
+            Account: admin
+            Password: (Mã hoá)
+            Name: Quản trị viên
+            TimeCreated: (Thời gian tạo)
+            Avatar: (tên file avatar trên server)
+            Level: CAPPHONG
+            IsAdmin: true
+        }
+    Phần backend:
+        Tạo bảng Các loại báo cáo;
+        Tạo bảng Kỳ báo cáo;
+        Tạo bảng Báo cáo;
+        Tạo bảng user;
+        Tạo router cho CRUD của tất cả các bảng;
+        Ghi và lưu trữ nhật ký thao tác của tài khoản Admin
+        Ghi và lưu trữ nhật ký các gửi báo cáo của tài khoản chi nhánh.
+        Chú ý đặt tên tất cả các biến, tên bảng bằng tiếng Anh.
+    Phần frontend sẽ được cung cấp file figma chi tiết, cụ thể.
+    Logic được mô tả sơ lược như sau:
+        Phần frontend của tài khoản chi nhánh như sau:
+            Trang đăng nhập{
+                Mô tả:{
+                    - input nhập tên đăng nhập (có nhãn "Tên tài khoản:")
+                    - input nhập mất khẩu (có nhãn "Mật khẩu:")
+                    - Nút đăng nhập
+                    - Checkbox ghi nhớ đăng nhập.
+                    }
+                Xử lý logic như các trang đăng nhập bình thường, chú ý tự động đăng nhập nếu có ghi nhớ.  
+            }
+            Trang cá nhân{
+                Mô tả:{
+                    - Phía trên bên trái và giữa là tên và logo phần mềm "Hệ thống gửi báo cáo" có kích thước phù hợp.
+                    - Góc trên bên phải là menu thông tin tài khoản (kiểu tương tự zimbra mail) gồm Tên chi nhánh luôn được hiển thị và có nút tam giác để người dùng bấm vào thì danh sách sổ xuống gồm Tên chi nhánh, tên đăng nhập, đổi mật khẩu, nhật ký gửi báo cáo.
+                    Người dùng click vào đổi mật khẩu thì sẽ hiển ra giao diện đổi mật khẩu trong vùng nội dung của trang (vùng chiếm phần lớn của trang web)
+                    Người dùng click vào Xem nhật ký báo cáo thì hiển thị bảng các báo cáo đã gửi (có thể xem nhiều báo cáo của cùng một kỳ nếu gửi nhiều lần), có thể lọc và phân trang nếu nhật ký dài. 
+                    - Phía bên trái (khoảng 1/5 màn hình) là danh sách các kỳ báo cáo đang kích hoạt của tài khoản, sắp xếp theo thời hạn còn lại. Thông tin của mỗi kỳ gồm Tên kỳ báo cáo và thời gian bắt đầu - thời gian hết hạn báo cáo (đúng hạn).
+                    Người dùng click vào Kỳ báo cáo nào thì giao diện gửi báo cáo của kỳ báo cáo đó sẽ được hiển thị ở vùng nội dung. 
+                    Giao diện báo cáo như sau:{
+                        Tên kỳ báo cáo
+                        Tên đơn vị báo cáo
+                        Tên loại báo cáo
+                        Thời gian hiện tại
+
+                    }
+                }
+            }
+        Phần frontend của tài khoản quản trị:
+            Đăng nhập
+            Quản trị
+                Thông tin tài khoản quản trị
+                Quản lý Kỳ báo cáo
+                Quản lý tài khoản
+                Quản lý Báo cáo
+                Quản lý các loại báo cáo
+                Nhật ký thao tác
+	
+2. Công nghệ, giải pháp kỹ thuật (lập trình), các thành phần của mã nguồn dự án trong file congnghe.txt
+3. Các file roadmap được cung cấp trong file dự án.
+4. Nội dung các file mã nguồn của backend và frontend được lưu trong file project_dump.txt.
+Nguyên tắc khi thực hiện dự án:
+1. Công nghệ, giải pháp kỹ thuật (lập trình), các thành phần của mã nguồn dự án được lưu trong file congnghe.txt
+2. Roadmap tổng thể của toàn bộ dự án được cung cấp trong file roadmap_tongthe.md
+3. Roadmap con các cấp thấp hơn để có thể dễ dàng thực hiện và tự động hoá được lưu trong file roadmap_....md
+4. Các bước thực hiện trong roadmap phải lần lượt theo thứ tự, trong đó yêu cầu phải kiểm tra kết quả của từng bước (bằng cách tạo và chạy các scripts kiểm tra), nếu thành công thì hãy triển khai bước tiếp theo, nếu khó khăn (sau 10 lần thử) thì đề xuất hướng xử lý và người dùng sẽ quyết định (hạn chế điều này).
+5. Khi đã kiểm tra thành công bước tổng thể thì hoàn thiện các chi tiết nhỏ hơn. Ví dụ, ưu tiên xây dựng cây thư mục của toàn bộ/hoặc những phần quan trọng của dự án trước; ưu tiên tạo các file quan trọng để chạy logic của dự án trước; ưu tiên xây dựng các thành phần để sử dụng kiểm tra cho các bước phía sau trước.
+6. Phải tuân thủ roadmap, giải pháp kỹ thuật,  công nghệ và cách thành phần để thực hiện dự án.
+7. Lưu các file tôi cung cấp trong thư mục dự án và cập nhật sau khi thực hiện mỗi bước trong roadmap để dễ theo dõi và chạy lại khi bị ngắt. Nếu sửa đổi, bổ sung thì phải nêu rõ lý do thay đổi.
+8. Cập nhật cây thư mục mỗi khi phát sinh mới file hoặc thư mục. Cây thư mục được lưu trong file tree.md.
+9. Nếu phát sinh mới file hoặc thư mục thì hãy đóng gói đúng cấu trúc thư mục và nén trong một file .zip. Tôi chỉ cần giải nén và copy vào dự án.
+
+
+
+
+
 ===== FILE: backend/requirements.txt =====
 fastapi
 uvicorn[standard]
@@ -196,10 +392,6 @@ app.include_router(report.router, prefix="/report", tags=["Report"])
 app.include_router(loai_baocao.router, prefix="/admin/loaibaocao", tags=["Loại báo cáo"])
 app.include_router(yeu_cau.router, prefix="/report/request", tags=["Yêu cầu báo cáo"])
 
-@app.on_event("startup")
-async def on_startup():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
 
 @app.get("/ping")
 async def ping():
@@ -295,24 +487,55 @@ class LoaiBaoCao(Base):
     dinh_ky = Column(Integer, default=0)  # đơn vị giờ/ngày/tuần...
 
 
-===== FILE: backend/app\models\report.py =====
+===== FILE: backend/app\models\period.py =====
+from sqlalchemy import Column, String, DateTime
+from sqlalchemy.orm import relationship
+from ..database import Base
 
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime
-from sqlalchemy.sql import func
+class Period(Base):
+    __tablename__ = "periods"
+
+    TYPE = Column(String, nullable=False)  # ID của loại báo cáo
+    ID = Column(String, primary_key=True, index=True)  # <TYPE>_<ActiveAt>
+    Name = Column(String, nullable=False)
+    ActiveAt = Column(DateTime(timezone=True), nullable=False)
+    DeactiveAt = Column(DateTime(timezone=True), nullable=False)
+    StartAt = Column(DateTime(timezone=True), nullable=False)
+    EndAt = Column(DateTime(timezone=True), nullable=False)
+    FromAt = Column(DateTime(timezone=True), nullable=False)
+    ToAt = Column(DateTime(timezone=True), nullable=False)
+    Killer = Column(String, nullable=False)  # Auto / Admin
+    Status = Column(String, nullable=False)  # Active / Deactive
+    FolderPath = Column(String, nullable=True)  # Đường dẫn thư mục lưu báo cáo
+
+    reports = relationship("Report", back_populates="period")
+
+
+===== FILE: backend/app\models\report.py =====
+from sqlalchemy import Column, String, Integer, DateTime, Boolean, ForeignKey
+from sqlalchemy.orm import relationship
 from ..database import Base
 
 class Report(Base):
     __tablename__ = "reports"
 
-    id = Column(Integer, primary_key=True, index=True)
-    loai_baocao_id = Column(Integer, ForeignKey("loai_baocao.id"))
-    user_id = Column(Integer, ForeignKey("users.id"))
-    filename = Column(String)
-    filesize = Column(Integer)
-    has_event = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    is_late = Column(Boolean, default=False)
-    late_seconds = Column(Integer, default=0)
+    ID = Column(String, primary_key=True, index=True)
+    Sender = Column(String, nullable=False)
+    SendID = Column(Integer, nullable=False)
+    PeriodID = Column(String, ForeignKey("periods.ID"), nullable=False)
+    ReportTypeID = Column(String, nullable=False)
+    ReportPeriodName = Column(String, nullable=False)
+    Blake3sum = Column(String, nullable=False)
+    FilePath = Column(String, nullable=False)
+    FileName = Column(String, nullable=False)
+    OriFileName = Column(String, nullable=False)
+    FileSize = Column(Integer, nullable=False)
+    SentAt = Column(DateTime(timezone=True), nullable=False)
+    Comment = Column(String, nullable=True)
+    HasEvent = Column(Boolean, default=True)
+    LateSeconds = Column(Integer, default=0)
+
+    period = relationship("Period", back_populates="reports")
 
 
 ===== FILE: backend/app\models\user.py =====
@@ -602,14 +825,54 @@ from ..crud.audit_log import log_action
 
 router = APIRouter()
 
-# (các API cũ)...
+@router.post("/", response_model=YeuCauBaoCaoOut)
+async def create_request(data: YeuCauBaoCaoCreate, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    users = await db.execute(select(User).where(User.id.in_(data.user_ids)))
+    user_list = users.scalars().all()
+    if not user_list:
+        raise HTTPException(status_code=404, detail="Không tìm thấy chi nhánh")
+    req = YeuCauBaoCao(
+        loai_baocao_id=data.loai_baocao_id,
+        dinh_ky_value=data.dinh_ky_value,
+        dinh_ky_unit=data.dinh_ky_unit,
+        is_active=data.is_active,
+        users=user_list
+    )
+    db.add(req)
+    await db.commit()
+    await log_action(db, admin.id, "create", "YeuCauBaoCao", req.id, f"Tạo yêu cầu báo cáo tới {len(user_list)} chi nhánh")
+    refreshed = await db.execute(
+        select(YeuCauBaoCao).options(selectinload(YeuCauBaoCao.users)).where(YeuCauBaoCao.id == req.id)
+    )
+    req = refreshed.scalar_one()
+    return YeuCauBaoCaoOut(
+        id=req.id,
+        loai_baocao_id=req.loai_baocao_id,
+        dinh_ky_value=req.dinh_ky_value,
+        dinh_ky_unit=req.dinh_ky_unit,
+        is_active=req.is_active,
+        user_ids=[u.id for u in req.users]
+    )
+
+@router.get("/", response_model=list[YeuCauBaoCaoOut])
+async def get_requests(db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    result = await db.execute(select(YeuCauBaoCao).options(selectinload(YeuCauBaoCao.users)))
+    requests = result.scalars().all()
+    return [
+        YeuCauBaoCaoOut(
+            id=r.id,
+            loai_baocao_id=r.loai_baocao_id,
+            dinh_ky_value=r.dinh_ky_value,
+            dinh_ky_unit=r.dinh_ky_unit,
+            is_active=r.is_active,
+            user_ids=[u.id for u in r.users]
+        ) for r in requests
+    ]
 
 @router.get("/my", response_model=list[YeuCauBaoCaoOut])
 async def get_my_requests(user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(YeuCauBaoCao)
-        .options(selectinload(YeuCauBaoCao.users))
-        .where(YeuCauBaoCao.is_active == True)
+        select(YeuCauBaoCao).options(selectinload(YeuCauBaoCao.users)).where(YeuCauBaoCao.is_active == True)
     )
     all_requests = result.scalars().all()
     filtered = [r for r in all_requests if any(u.id == user.id for u in r.users)]
@@ -623,6 +886,64 @@ async def get_my_requests(user=Depends(get_current_user), db: AsyncSession = Dep
             user_ids=[u.id for u in r.users]
         ) for r in filtered
     ]
+
+@router.put("/{id}", response_model=YeuCauBaoCaoOut)
+async def update_request(id: int, data: YeuCauBaoCaoCreate, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    result = await db.execute(select(YeuCauBaoCao).where(YeuCauBaoCao.id == id))
+    req = result.scalar_one_or_none()
+    if not req:
+        raise HTTPException(status_code=404, detail="Không tìm thấy yêu cầu")
+    user_result = await db.execute(select(User).where(User.id.in_(data.user_ids)))
+    req.users = user_result.scalars().all()
+    req.loai_baocao_id = data.loai_baocao_id
+    req.dinh_ky_value = data.dinh_ky_value
+    req.dinh_ky_unit = data.dinh_ky_unit
+    req.is_active = data.is_active
+    await db.commit()
+    await db.refresh(req)
+    await log_action(db, admin.id, "update", "YeuCauBaoCao", req.id, "Cập nhật yêu cầu báo cáo")
+    refreshed = await db.execute(select(YeuCauBaoCao).options(selectinload(YeuCauBaoCao.users)).where(YeuCauBaoCao.id == req.id))
+    req = refreshed.scalar_one()
+    return YeuCauBaoCaoOut(
+        id=req.id,
+        loai_baocao_id=req.loai_baocao_id,
+        dinh_ky_value=req.dinh_ky_value,
+        dinh_ky_unit=req.dinh_ky_unit,
+        is_active=req.is_active,
+        user_ids=[u.id for u in req.users]
+    )
+
+@router.put("/{id}/active", response_model=YeuCauBaoCaoOut)
+async def update_active_status(id: int, data: ActiveUpdate, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    result = await db.execute(select(YeuCauBaoCao).where(YeuCauBaoCao.id == id))
+    req = result.scalar_one_or_none()
+    if not req:
+        raise HTTPException(status_code=404, detail="Không tìm thấy yêu cầu")
+    req.is_active = data.is_active
+    await db.commit()
+    await db.refresh(req)
+    await log_action(db, admin.id, "update", "YeuCauBaoCao", req.id, f"{'Kích hoạt' if data.is_active else 'Huỷ kích hoạt'} yêu cầu")
+    refreshed = await db.execute(select(YeuCauBaoCao).options(selectinload(YeuCauBaoCao.users)).where(YeuCauBaoCao.id == req.id))
+    req = refreshed.scalar_one()
+    return YeuCauBaoCaoOut(
+        id=req.id,
+        loai_baocao_id=req.loai_baocao_id,
+        dinh_ky_value=req.dinh_ky_value,
+        dinh_ky_unit=req.dinh_ky_unit,
+        is_active=req.is_active,
+        user_ids=[u.id for u in req.users]
+    )
+
+@router.delete("/{id}")
+async def delete_request(id: int, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    result = await db.execute(select(YeuCauBaoCao).where(YeuCauBaoCao.id == id))
+    req = result.scalar_one_or_none()
+    if not req:
+        raise HTTPException(status_code=404, detail="Không tìm thấy yêu cầu")
+    await db.delete(req)
+    await db.commit()
+    await log_action(db, admin.id, "delete", "YeuCauBaoCao", req.id, "Xoá yêu cầu báo cáo")
+    return {"msg": "Đã xoá yêu cầu báo cáo"}
 
 
 ===== FILE: backend/app\schemas\audit_log.py =====

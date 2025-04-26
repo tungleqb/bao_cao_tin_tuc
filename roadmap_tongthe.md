@@ -1,79 +1,141 @@
-## 🛣️ Roadmap tổng thể dự án Hệ thống báo cáo tin tức
+**ROADMAP TONG THE VA CHI TIET - DU AN BAO CAO TIN TUC (CAP NHAT MOI)**
 
-### Giai đoạn 1: Khởi tạo dự án & xây dựng cấu trúc thư mục cơ bản
-- [ ] B1. Khởi tạo dự án backend FastAPI
-  - [ ] Tạo cấu trúc thư mục `backend/app/`
-  - [ ] Tạo file `main.py`, cấu hình route cơ bản
-  - [ ] Cài đặt các thư viện: `fastapi`, `uvicorn`, `sqlalchemy`, `asyncpg`, `python-jose`, `passlib`, `pydantic`, `python-multipart`
-  - [ ] Tạo `config.py` để quản lý cấu hình
-  - [ ] Viết script kiểm thử: chạy được FastAPI với route `/ping`
+# 1. GIAI DOAN 1: CAP NHAT CO SO DU LIEU
 
-- [ ] B2. Khởi tạo frontend bằng Vite + React + Tailwind
-  - [ ] Cấu trúc thư mục `frontend/src`
-  - [ ] Tạo các thư mục con: `pages/`, `components/`, `router/`, `services/`, `utils/`
-  - [ ] Thiết lập layout chung: `App.jsx`, `main.jsx`, cấu hình routing cơ bản
-  - [ ] Kiểm thử frontend hiển thị trang mẫu thành công
+## Buoc 1.1: Tao model Period va update model Report
+- Tao file `backend/app/models/period.py`.
+- Cap nhat file `backend/app/models/report.py` de dung theo format moi (Sender, SendID, PeriodID, ...).
 
-### Giai đoạn 2: Tài khoản và xác thực
-- [ ] B3. Backend: Xây dựng tính năng xác thực JWT
-  - [ ] Route: `/auth/login`, `/auth/register` (chỉ Admin), `/auth/me`
-  - [ ] Mã hóa mật khẩu, tạo JWT Token, kiểm tra token
-  - [ ] Tạo bảng `User` với các trường: username, password, tên chi nhánh, is_admin
-  - [ ] Test đăng nhập, đăng ký, xác thực token
+**Kiem tra:**
+- Khoi tao doi tuong Period bang tay trong Python shell.
+- Khoi tao doi tuong Report moi voi du lieu day du.
 
-- [ ] B4. Frontend: Giao diện đăng nhập, xác thực
-  - [ ] Giao diện login, lưu token vào localStorage
-  - [ ] Middleware kiểm tra token khi gọi API
+## Buoc 1.2: Tao Alembic Migration
+- Sinh file migration tu dong: `alembic revision --autogenerate -m "create period table and update report table"`
+- Chay `alembic upgrade head`.
 
-### Giai đoạn 3: Quản lý chi nhánh (tài khoản)
-- [ ] B5. Backend: CRUD tài khoản chi nhánh
-  - [ ] API: tạo, sửa, xóa, danh sách tài khoản
-  - [ ] Liên kết bảng `User` với lịch sử báo cáo
+**Kiem tra:**
+- Kiem tra PostgreSQL: xuat hien bang `periods` va update bang `reports`.
 
-- [ ] B6. Frontend: Giao diện quản lý tài khoản
-  - [ ] Danh sách chi nhánh, form tạo/sửa/xóa tài khoản
+---
 
-### Giai đoạn 4: Hệ thống báo cáo
-- [ ] B7. Backend: Upload báo cáo, lưu trữ file
-  - [ ] API: `/report/upload`, `/report/history`, `/report/status`
-  - [ ] Đổi tên file, tạo thư mục theo kỳ
-  - [ ] Báo cáo ngày chia thành thư mục: `co_su_kien/`, `khong_su_kien/`
-  - [ ] Ghi nhận thời gian gửi, trễ bao nhiêu giây
-  - [ ] Tạo bảng `Report`
+# 2. GIAI DOAN 2: CAP NHAT BACKEND API
 
-- [ ] B8. Frontend: Giao diện gửi báo cáo
-  - [ ] Form chọn loại báo cáo, file upload, chọn sự kiện (nếu báo cáo ngày)
-  - [ ] Đồng hồ đếm ngược thời hạn, hiển thị đúng/trễ (màu xanh/đỏ)
+## Buoc 2.1: CRUD cho Period
+- Tao file `backend/app/routers/period.py`.
+- Tao schema `backend/app/schemas/period.py`.
+- Tao route: GET, POST, PUT, DELETE Period.
 
-### Giai đoạn 5: Loại báo cáo và yêu cầu báo cáo
-- [ ] B9. Backend: API quản lý loại báo cáo và yêu cầu
-  - [ ] Tạo bảng `LoaiBaoCao` và `YeuCauBaoCao`
-  - [ ] API tạo, sửa, xóa loại báo cáo
-  - [ ] API tạo yêu cầu, phân phối tới tài khoản chi nhánh
+**Kiem tra:**
+- Dung Swagger UI test: tao, cap nhat, xoa 1 Period thanh cong.
 
-- [ ] B10. Frontend: Quản lý loại báo cáo và hiển thị yêu cầu gửi
-  - [ ] Admin: giao diện tạo loại và yêu cầu báo cáo
-  - [ ] Chi nhánh: hiển thị nút báo cáo theo yêu cầu
+## Buoc 2.2: APIs Upload Report theo Period
+- Cap nhat API `/report/upload`:
+  - Nhan thong tin PeriodID.
+  - Tinh toan LateSeconds.
+  - Luu file vao folder cua Period.
+  - Sinh checksum Blake3 cho file.
 
-### Giai đoạn 6: Thống kê báo cáo
-- [ ] B11. Backend: Thống kê và export Excel
-  - [ ] API `/admin/report/statistics`
-  - [ ] Sử dụng pandas/openpyxl để xuất Excel với đầy đủ cột: tên đơn vị, thời gian, đúng hạn hay trễ, có sự kiện, tên file
+**Kiem tra:**
+- Upload file tren Swagger UI: kiem tra file duoc luu dung thu muc, dung dinh dang Report.
 
-- [ ] B12. Frontend: Giao diện thống kê cho admin
-  - [ ] Bảng thống kê, lọc theo loại báo cáo, đơn vị, thời gian
-  - [ ] Nút export Excel
+## Buoc 2.3: APIs lay lich su bao cao user
+- Them API `/user/reports`:
+  - Lay danh sach cac bao cao da gui cua user hien tai.
 
-### Giai đoạn 7: Tác vụ định kỳ & hoàn thiện
-- [ ] B13. Cấu hình APScheduler hoặc Celery
-  - [ ] Nhắc nhở qua email/tin nhắn khi gần hết hạn gửi báo cáo
+**Kiem tra:**
+- Test API lay danh sach bao cao cua user trong Swagger UI.
 
-- [ ] B14. Kiểm thử toàn hệ thống
-  - [ ] Viết bộ test API cho tất cả route quan trọng
-  - [ ] Test upload file, thống kê, xác thực báo cáo đúng/trễ
+## Buoc 2.4: APIs Periods dang kich hoat
+- Them API `/period/active`:
+  - Tra ve danh sach cac ky dang active cua user hien tai.
 
-- [ ] B15. Triển khai production
-  - [ ] Docker hóa backend và frontend
-  - [ ] Triển khai PostgreSQL và lưu file lên S3 nếu cần
-  - [ ] Triển khai server bằng Gunicorn + Nginx hoặc Uvicorn trực tiếp
+**Kiem tra:**
+- Test API tra ve danh sach dung ky dang kich hoat.
+
+---
+
+# 3. GIAI DOAN 3: THEM TU DONG HOA (SCHEDULER)
+
+## Buoc 3.1: Tich hop APScheduler
+- Cai dat APScheduler vao FastAPI.
+- Dinh nghia job:
+  - Tu dong tao Period khi den ActiveAt.
+  - Tu dong huy Period khi den DeactiveAt.
+
+**Kiem tra:**
+- Tao mot Period co thoi diem ActiveAt trong 2 phut toi.
+- Cho he thong tu kich hoat va huy Period do.
+
+---
+
+# 4. GIAI DOAN 4: CAP NHAT FRONTEND
+
+## Buoc 4.1: Cap nhat luong dang nhap
+- Neu user la Admin -> vao dashboard admin.
+- Neu user la chi nhanh -> vao UserHomePage.
+
+**Kiem tra:**
+- Dang nhap voi 2 loai user: chuyen dung giao dien tuong ung.
+
+## Buoc 4.2: Xay dung trang UserHomePage
+- Sidebar trai: danh sach Period dang active.
+- Noi dung chinh: giao dien Upload Report theo Period.
+- Header: thong tin user, menu nho.
+
+**Kiem tra:**
+- Dang nhap, xem danh sach ky, upload bao cao moi, kiem tra file upload.
+
+## Buoc 4.3: Trang lich su bao cao (ReportHistory)
+- Danh sach bao cao da gui.
+- Loc theo Period.
+- Phan trang neu du lieu lon.
+
+**Kiem tra:**
+- Vao trang xem lich su bao cao, loc du lieu.
+
+## Buoc 4.4: Admin quan ly Kỳ báo cáo (AdminPeriods.jsx)
+- Giao dien tao, cap nhat, xoa, kich hoat ky bao cao.
+
+**Kiem tra:**
+- Tao ky moi, sua ky, xoa ky.
+
+---
+
+# 5. GIAI DOAN 5: KIEM THU TONG THE
+
+## Buoc 5.1: Viet script kiem thu Backend
+- Test API upload bao cao.
+- Test API lich su bao cao.
+- Test API tu dong tao/huy Period.
+
+**Kiem tra:**
+- Chay script -> tat ca test pass.
+
+## Buoc 5.2: Viet script kiem thu Frontend
+- Test tu dong login, upload file, xem lich su.
+
+**Kiem tra:**
+- Tat ca luong tu dong hoan tat khong loi.
+
+---
+
+# 6. GIAI DOAN 6: HOAN THIEN
+
+## Buoc 6.1: Export Excel thong ke bao cao
+- Chuc nang xuat thong ke ky bao cao ra file Excel.
+
+**Kiem tra:**
+- Xuat file Excel, mo file dung du lieu.
+
+## Buoc 6.2: Cap nhat README, huong dan su dung
+- Cap nhat tai lieu README.md.
+- Bo sung cac API moi.
+
+**Kiem tra:**
+- Mo README, doc day du cac buoc huong dan.
+
+---
+
+# Ket thuc Roadmap
 

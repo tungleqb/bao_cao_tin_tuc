@@ -1,0 +1,125 @@
+Có sự thay đổi về logic dự án.
+1. Mô tả dự án: 
+	Xây dựng website báo cáo tin tức, sự kiện diễn ra trong ngày, tuần, tháng, đột xuất (mới bổ sung) cho các đơn vị hành chính.
+	Mỗi đơn vị hành chính sẽ được quản trị viên cấp một tài khoản (gọi là tài khoản chi nhánh) để đăng nhập (không đổi).
+	Mỗi tài khoản chi nhánh sau khi đăng nhập sẽ chọn loại báo cáo. Các loại báo cáo gồm Báo cáo ngày, Báo cáo tuần, Báo cáo tháng, các báo cáo đột xuất (mới bổ sung).
+    Dự án sử dụng các dữ liệu sau: Loại báo cáo, Kỳ báo cáo, Báo cáo, Tài khoản.
+    Trong đó, Loại báo cáo được mô tả chi tiếp trong file spec_loaibaocao.txt. Mỗi loại báo cáo sẽ có nhiều kỳ báo cáo khác nhau.
+    Bảng Báo cáo được mô tả và định dạng như sau:{
+        Mô tả: {
+            Báo cáo là được sử dụng để quản lý tình trạng về báo cáo của tài khoản chi nhánh đã gửi đến backend trong một kỳ báo cáo cụ thể.
+        }
+        Báo cáo có định dạng:
+        {
+            Sender: #Tên tài khoản gửi báo cáo
+            SendID: #ID tài khoản gửi
+            ID: #<SendID>_<ID của kỳ báo cáo>_<giờ, phút, giây, ngày, tháng, năm gửi>
+            PeriodID: #<ID của kỳ báo cáo>
+            ReportTypeID: #<ID của loại báo cáo>
+            ReportPeriodName: #<Tên của kỳ báo cáo>
+            Blake3sum: #Blake3 checksum của file đính kèm báo cáo
+            FilePath: #đường dẫn file đính kèm được lưu trên máy chủ
+            FileName: #tên file đã lưu có dạng <tên chi nhánh viết liền không dấu>_<PeriodID>
+            OriFileName: #tên file gốc khi nhận được (chưa đổi tên)
+            FileSize: #Kích thước file
+            SentAt: #Thời gian gửi báo cáo
+            Comment: #Nội dung lời nhắn, nếu có
+            HasEvent: #Cho biết báo cáo có sự kiện đáng chú ý hay không, dạng true/false
+            LateSeconds: #Số giây bị trễ so với đúng hạn, số âm là gửi sớm hơn StartAt của loại báo cáo, số dương là quá thời gian đúng hạn, trong khoảng thời gian đúng hạn là 0.
+        }
+    }
+    Bảng Kỳ báo cáo được mô tả và định dạng như sau:
+        Mô tả: {
+            Kỳ báo cáo được sử dụng để Quản trị viên có thể quản lý, lưu trữ thông tin các báo cáo từ tài khoản chi nhánh trong một kỳ/ đợt báo cáo.
+            lưu trữ thông tin thời gian cụ thể về ActiveOn, DeactiveOn, ActiveAt, DeactiveAt, StartOn, EndOn, StartAt, EndAt, FromOn, ToOn, From, To.
+            Kỳ báo cáo cũng lưu thông tin về đường dẫn thư mục lưu các file báo cáo (nhận từ các chi nhánh gửi về trong kỳ).
+        }
+        Định dạng như sau:
+        {
+            TYPE: #ID của loại báo cáo
+            ID: #Định dạng <TYPE>_<ActiveAt của Kỳ báo cáo (self)>, tự động sinh khi tạo đối tượng kỳ báo cáo.
+            Name: #Tự động sinh khi khởi tạo Kỳ báo cáo <Name của loại báo cáo>_<thời gian của Kỳ báo cáo> (thời gian của kỳ báo cáo tuỳ thuộc chu kỳ báo cáo: đối với DAILY có dạng <dd/mm/yyyy> là ngày tháng năm của StartAt.
+             đối với WEEKLY hoặc NONE có dạng từ <From> đến <To>; đối với MONTHLY có dạng <mm/yyyy> là tháng của StartAt).
+            ActiveAt: #Ý nghĩa cho biết mốc thời gian kích hoạt, Định dạng giờ phút giây ngày tháng năm, tự động tính toán từ các trường ActiveOffset, ActiveOn, ActiveAt của mỗi Loại báo cáo (TYPE).
+            DectiveAt: #Ý nghĩa cho cả hệ thống, người dùng biết mốc thời gian huỷ kích hoạt, Định dạng giờ phút giây ngày tháng năm, tự động tính toán từ các trường DeactiveOffset, DeactiveOn, DeactiveAt của mỗi Loại báo cáo (TYPE).
+            StartAt: #Ý nghĩa cho biết mốc thời gian bắt đầu tính báo cáo đúng hạn, Định dạng giờ phút giây ngày tháng năm, tự động tính toán từ các trường StartOffset, StartOn, StartAt của mỗi Loại báo cáo (TYPE).
+            EndAt: #Ý nghĩa cho biết mốc thời gian kết thúc tính báo cáo đúng hạn, Định dạng giờ phút giây ngày tháng năm, tự động tính toán từ các trường EndOffset, EndOn, EndAt của mỗi Loại báo cáo (TYPE).
+            From: #Ý nghĩa cho người dùng biết mốc thời gian bắt đầu lấy số liệu báo cáo, Định dạng giờ phút giây ngày tháng năm, tự động tính toán từ các trường FromOffset, FromOn, From của mỗi Loại báo cáo (TYPE).
+            To: #Ý nghĩa cho người dùng biết mốc thời gian kết thúc lấy số liệu báo cáo đúng hạn, Định dạng giờ phút giây ngày tháng năm, tự động tính toán từ các trường FromOffset, FromOn, From của mỗi Loại báo cáo (TYPE).
+            Killer: #Ý nghĩa cho biết có tự động huỷ kích hoạt hay là do quản trị viên <Auto or Admin>
+            Status: #Cho biết trạng thái Active hay là Deactive
+            Reports: #Chứa anh sách các Báo cáo đã nhận được từ cách chi nhánh (nếu chi nhánh gửi nhiều lần thì chỉ ghi nhận cái sau cùng))
+            FolderPath: #Đường dẫn thư mục lưu trữ file đính kèm báo cáo của các chi nhánh, tự động tạo thư mục trên máy chủ với là ID của Kỳ báo cáo, đường dẫn vào đây. 
+        }
+    Bảng Tài khoản được mô tả và định dạng như sau:{
+        Mô tả: {
+            Để quản lý tài khoản của Quản trị viên và các chi nhánh.
+            Tài khoản quản trị viên được khởi tạo thủ công
+        }
+        Định dạng:
+        {
+            ID: #Theo số thứ tự
+            Account: #tên đăng nhập không dấu
+            Password: #Mã hoá
+            Name: #Tên chi nhánh
+            TimeCreated: #Thời gian tạo
+            Avatar: #tên file avatar trên server, tạm thời không dùng
+            Level: #Cấp chi nhánh gồm CAPPHONG/CAPXA
+            IsAdmin: #Cho biết có phải tài khoản quản trị viên hay không true/false
+        }
+    }
+    Phần frontend đã được mô tả trong file frontend.fig. Có logic như sau: {
+        Truy cập trang chủ sẽ vào trang yêu cầu đăng nhập nếu chưa đăng nhập.
+        Khi đã đăng nhập thành công sẽ tự động đến trang báo cáo ngày (đối với tài khoản chi nhánh), tự động đến trang tổng hợp báo cáo (quản trị viên).
+    }
+    Phần backend có cách chức năng sau:
+        1. Nhận báo cáo, mô tả {
+            Các tài khoản API gửi báo cáo đến backend
+            backend nhận, lưu file báo cáo và tạo báo cáo lưu vào bảng Báo cáo, cập nhật kỳ báo cáo}
+        2. Kích hoạt kỳ báo cáo (tự động hoặc từ quản trị viên), mô tả {
+            Tự động tính toán mốc thời gian và tự động kích hoạt và tạo Kỳ báo cáo theo các trường ActiveOffset, ActiveOn, ActiveAt của mỗi Loại báo cáo.
+            Hoặc kích hoạt theo yêu cầu từ quản trị viên (trong giao diện quản lý Kỳ báo cáo).
+        }
+        3. Huỷ kích hoạt kỳ báo cáo (tự động hoặc từ quản trị viên), mô tả {
+            Tự động theo dõi Kỳ báo cáo và tính toán mốc thời gian và tự động huỷ kích hoạt theo các trường ActiveOffset, ActiveOn, ActiveAt của mỗi Loại báo cáo.
+            Hoặc kích hoạt theo yêu cầu từ quản trị viên (trong giao diện quản lý Kỳ báo cáo).
+        }
+        4. Router cho CRUD của các loại bảng dùng trong dự án.
+        5. Ghi nhật ký cho tài khoản quản trị viên.
+    
+        Tạo bảng Các loại báo cáo;
+        Tạo bảng Kỳ báo cáo;
+        Tạo bảng Báo cáo;
+        Tạo bảng user;
+        Tạo router cho CRUD của tất cả các bảng;
+    Ghi và lưu trữ nhật ký thao tác của tài khoản Admin
+    Ghi và lưu trữ nhật ký các gửi báo cáo của tài khoản chi nhánh.
+    Chú ý đặt tên tất cả các biến, tên bảng bằng tiếng Anh.
+    Logic được mô tả sơ lược như sau:
+        Phần frontend của tài khoản chi nhánh như sau:
+            Trang đăng nhập{
+                Mô tả:{
+                    - input nhập tên đăng nhập (có nhãn "Tên tài khoản:")
+                    - input nhập mất khẩu (có nhãn "Mật khẩu:")
+                    - Nút đăng nhập
+                    - Checkbox ghi nhớ đăng nhập.
+                    }
+                Xử lý logic như các trang đăng nhập bình thường, chú ý tự động đăng nhập nếu có ghi nhớ.  
+            }
+            Trang cá nhân{
+                Mô tả:{
+                    - Phía trên bên trái và giữa là tên và logo phần mềm "Hệ thống gửi báo cáo" có kích thước phù hợp.
+                    - Góc trên bên phải là menu thông tin tài khoản (kiểu tương tự zimbra mail) gồm Tên chi nhánh luôn được hiển thị và có nút tam giác để người dùng bấm vào thì danh sách sổ xuống gồm Tên chi nhánh, tên đăng nhập, đổi mật khẩu, nhật ký gửi báo cáo.
+                    Người dùng click vào đổi mật khẩu thì sẽ hiển ra giao diện đổi mật khẩu trong vùng nội dung của trang (vùng chiếm phần lớn của trang web)
+                    Người dùng click vào Xem nhật ký báo cáo thì hiển thị bảng các báo cáo đã gửi (có thể xem nhiều báo cáo của cùng một kỳ nếu gửi nhiều lần), có thể lọc và phân trang nếu nhật ký dài. 
+                    - Phía bên trái (khoảng 1/5 màn hình) là danh sách các kỳ báo cáo đang kích hoạt của tài khoản, sắp xếp theo thời hạn còn lại. Thông tin của mỗi kỳ gồm Tên kỳ báo cáo và thời gian bắt đầu - thời gian hết hạn báo cáo (đúng hạn).
+                    Người dùng click vào Kỳ báo cáo nào thì giao diện gửi báo cáo của kỳ báo cáo đó sẽ được hiển thị ở vùng nội dung. 
+                    Giao diện báo cáo như sau:{
+                        Tên kỳ báo cáo
+                        Tên đơn vị báo cáo
+                        Tên loại báo cáo
+                        Thời gian hiện tại
+                    }
+                }
+            }
+        

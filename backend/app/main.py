@@ -24,10 +24,6 @@ app.include_router(report.router, prefix="/report", tags=["Report"])
 app.include_router(loai_baocao.router, prefix="/admin/loaibaocao", tags=["Loại báo cáo"])
 app.include_router(yeu_cau.router, prefix="/report/request", tags=["Yêu cầu báo cáo"])
 
-@app.on_event("startup")
-async def on_startup():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
 
 @app.get("/ping")
 async def ping():
