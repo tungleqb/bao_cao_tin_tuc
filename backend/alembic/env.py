@@ -25,10 +25,14 @@ def run_migrations_online():
     connectable = create_engine(settings.DATABASE_URL.replace("asyncpg", "psycopg2"))
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            compare_server_default=True,
+        )
         with context.begin_transaction():
             context.run_migrations()
-
 
 if context.is_offline_mode():
     run_migrations_offline()
