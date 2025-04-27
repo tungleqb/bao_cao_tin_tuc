@@ -1,7 +1,7 @@
 from logging.config import fileConfig
 from sqlalchemy import pool
 from alembic import context
-from app.models import user, loai_baocao, report  # Import models
+from app.models import user, loai_baocao, report, period
 from app.database import Base
 from app.config import settings
 
