@@ -1,35 +1,58 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Security
 from fastapi.security import OAuth2PasswordBearer
-from ..config import settings
 from jose import JWTError, jwt
-from ..schemas.user import UserOut
-from ..database import get_db
-from ..services.auth import get_user_by_username
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional
+from ..database import get_db
+from ..schemas.user import UserOut
+from ..services.auth import decode_token
+from ..crud.user import get_user
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
-SECRET_KEY = settings.SECRET_KEY
-ALGORITHM = "HS256"
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/admin/user/login")
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> UserOut:
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+async def get_current_user(token: str = Security(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> UserOut:
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-        db_user = await get_user_by_username(db, username)
+        print(f"🧪 TOKEN RECEIVED = {token}")
+        if not token:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authentication token")
+
+        try:
+            payload = decode_token(token)
+            user_id_raw = payload.get("sub")
+            if user_id_raw is None:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+
+            try:
+                user_id = int(user_id_raw)
+            except ValueError:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token `sub` must be integer")
+
+        except JWTError:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+
+        db_user = await get_user(db, user_id)
         if db_user is None:
-            raise credentials_exception
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        print("✅ Authenticated user:", db_user.username)
+        print("✅ Is admin:", db_user.is_admin)
         return UserOut.model_validate(db_user)
-    except JWTError:
-        raise credentials_exception
+    except HTTPException as e:  
+        print(f"❌ Error in get_current_user: {e.detail}")
+        raise e
+    except Exception as e:
+        print(f"❌ Unexpected error in get_current_user: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 async def get_current_admin(user: UserOut = Depends(get_current_user)):
-    if not user.is_admin:
-        raise HTTPException(status_code=403, detail="Không có quyền truy cập")
-    return user
+    try:
+        print(f"🧪 Kiểm tra quyền admin của user {user.username} - is_admin={user.is_admin}")
+        if not user.is_admin:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No permission")
+        return user
+    except HTTPException as e:
+        print(f"❌ Error in get_current_admin: {e.detail}")
+        raise e
+    except Exception as e:
+        print(f"❌ Unexpected error in get_current_admin: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")

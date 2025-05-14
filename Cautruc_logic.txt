@@ -30,27 +30,48 @@ Có sự thay đổi về logic dự án.
     }
     Bảng Kỳ báo cáo được mô tả và định dạng như sau:
         Mô tả: {
-            Kỳ báo cáo được sử dụng để Quản trị viên có thể quản lý, lưu trữ thông tin các báo cáo từ tài khoản chi nhánh trong một kỳ/ đợt báo cáo.
-            lưu trữ thông tin thời gian cụ thể về ActiveOn, DeactiveOn, ActiveAt, DeactiveAt, StartOn, EndOn, StartAt, EndAt, FromOn, ToOn, From, To.
-            Kỳ báo cáo cũng lưu thông tin về đường dẫn thư mục lưu các file báo cáo (nhận từ các chi nhánh gửi về trong kỳ).
+            Kỳ báo cáo được sử dụng để Quản trị viên có thể quản lý, lưu trữ thông tin các báo cáo từ tài khoản chi nhánh trong một kỳ/đợt báo cáo.
+            Kỳ báo cáo lưu trữ các mốc thời gian quan trọng cho cả tài khoản cấp phòng (CAPPHONG) và tài khoản cấp xã (CAPXA), bao gồm:
+                Thời gian kích hoạt gửi báo cáo.
+                Thời gian tính đúng hạn báo cáo.
+                Khoảng thời gian lấy số liệu.
+            Kỳ báo cáo lưu đường dẫn thư mục để lưu file báo cáo nhận được từ các chi nhánh.
+            Trạng thái kích hoạt/huỷ kích hoạt được quản lý riêng biệt cho từng cấp (CAPPHONG và CAPXA).
+            Ghi chú về cách tạo kỳ báo cáo:
+                Khi khởi tạo kỳ báo cáo, hệ thống lấy thời điểm sớm nhất giữa ActiveAt và XaActiveAt để sinh ID và Name của kỳ báo cáo.
+                Hai trạng thái Status (CAPPHONG) và XaStatus (CAPXA) sẽ được cập nhật độc lập dựa trên thời gian thực:
+                Khi đạt tới ActiveAt, Status chuyển Active; khi tới DeactiveAt, chuyển Deactive.
+                Khi đạt tới XaActiveAt, XaStatus chuyển Active; khi tới XaDeactiveAt, chuyển Deactive.
+                Khi kiểm tra việc gửi báo cáo, hệ thống sẽ dựa trên level của tài khoản (CAPPHONG hoặc CAPXA) để xác định mốc thời gian áp dụng và đúng hạn.
         }
         Định dạng như sau:
         {
-            TYPE: #ID của loại báo cáo
-            ID: #Định dạng <TYPE>_<ActiveAt của Kỳ báo cáo (self)>, tự động sinh khi tạo đối tượng kỳ báo cáo.
-            Name: #Tự động sinh khi khởi tạo Kỳ báo cáo <Name của loại báo cáo>_<thời gian của Kỳ báo cáo> (thời gian của kỳ báo cáo tuỳ thuộc chu kỳ báo cáo: đối với DAILY có dạng <dd/mm/yyyy> là ngày tháng năm của StartAt.
-             đối với WEEKLY hoặc NONE có dạng từ <From> đến <To>; đối với MONTHLY có dạng <mm/yyyy> là tháng của StartAt).
-            ActiveAt: #Ý nghĩa cho biết mốc thời gian kích hoạt, Định dạng giờ phút giây ngày tháng năm, tự động tính toán từ các trường ActiveOffset, ActiveOn, ActiveAt của mỗi Loại báo cáo (TYPE).
-            DectiveAt: #Ý nghĩa cho cả hệ thống, người dùng biết mốc thời gian huỷ kích hoạt, Định dạng giờ phút giây ngày tháng năm, tự động tính toán từ các trường DeactiveOffset, DeactiveOn, DeactiveAt của mỗi Loại báo cáo (TYPE).
-            StartAt: #Ý nghĩa cho biết mốc thời gian bắt đầu tính báo cáo đúng hạn, Định dạng giờ phút giây ngày tháng năm, tự động tính toán từ các trường StartOffset, StartOn, StartAt của mỗi Loại báo cáo (TYPE).
-            EndAt: #Ý nghĩa cho biết mốc thời gian kết thúc tính báo cáo đúng hạn, Định dạng giờ phút giây ngày tháng năm, tự động tính toán từ các trường EndOffset, EndOn, EndAt của mỗi Loại báo cáo (TYPE).
-            From: #Ý nghĩa cho người dùng biết mốc thời gian bắt đầu lấy số liệu báo cáo, Định dạng giờ phút giây ngày tháng năm, tự động tính toán từ các trường FromOffset, FromOn, From của mỗi Loại báo cáo (TYPE).
-            To: #Ý nghĩa cho người dùng biết mốc thời gian kết thúc lấy số liệu báo cáo đúng hạn, Định dạng giờ phút giây ngày tháng năm, tự động tính toán từ các trường FromOffset, FromOn, From của mỗi Loại báo cáo (TYPE).
-            Killer: #Ý nghĩa cho biết có tự động huỷ kích hoạt hay là do quản trị viên <Auto or Admin>
-            Status: #Cho biết trạng thái Active hay là Deactive
-            Reports: #Chứa anh sách các Báo cáo đã nhận được từ cách chi nhánh (nếu chi nhánh gửi nhiều lần thì chỉ ghi nhận cái sau cùng))
-            FolderPath: #Đường dẫn thư mục lưu trữ file đính kèm báo cáo của các chi nhánh, tự động tạo thư mục trên máy chủ với là ID của Kỳ báo cáo, đường dẫn vào đây. 
+            TYPE: string,           // ID của loại báo cáo.
+            ID: string,             // Mã kỳ báo cáo, định dạng <TYPE>_<ActiveAt hoặc XaActiveAt>, tự động sinh khi khởi tạo.
+            Name: string,           // Tên kỳ báo cáo, sinh tự động từ tên loại báo cáo và thời gian kỳ báo cáo.
+
+            ActiveAt: datetime,     // Mốc kích hoạt gửi báo cáo cho tài khoản cấp phòng (CAPPHONG).
+            DeactiveAt: datetime,   // Mốc huỷ gửi báo cáo cho cấp phòng.
+            StartAt: datetime,      // Mốc bắt đầu tính đúng hạn gửi báo cáo (CAPPHONG).
+            EndAt: datetime,        // Mốc kết thúc tính đúng hạn gửi báo cáo (CAPPHONG).
+            FromAt: datetime,       // Mốc bắt đầu lấy số liệu báo cáo (CAPPHONG).
+            ToAt: datetime,         // Mốc kết thúc lấy số liệu báo cáo (CAPPHONG).
+
+            XaActiveAt: datetime,   // Mốc kích hoạt gửi báo cáo cho tài khoản cấp xã (CAPXA).
+            XaDeactiveAt: datetime, // Mốc huỷ gửi báo cáo cho CAPXA.
+            XaStartAt: datetime,    // Mốc bắt đầu tính đúng hạn gửi báo cáo (CAPXA).
+            XaEndAt: datetime,      // Mốc kết thúc tính đúng hạn gửi báo cáo (CAPXA).
+            XaFromAt: datetime,     // Mốc bắt đầu lấy số liệu báo cáo (CAPXA).
+            XaToAt: datetime,       // Mốc kết thúc lấy số liệu báo cáo (CAPXA).
+
+            Status: string,         // Trạng thái kỳ báo cáo cho cấp phòng: "Active" hoặc "Deactive".
+            XaStatus: string,       // Trạng thái kỳ báo cáo cho cấp xã: "Active" hoặc "Deactive".
+
+            Killer: string,         // Xác định kỳ bị huỷ tự động ("Auto") hoặc do quản trị viên ("Admin").
+            Reports: list,          // Danh sách các báo cáo đã nhận từ chi nhánh (chỉ ghi nhận bản gửi cuối cùng).
+            FolderPath: string      // Đường dẫn thư mục lưu file báo cáo đính kèm, tự động sinh từ ID kỳ báo cáo.
         }
+
     Bảng Tài khoản được mô tả và định dạng như sau:{
         Mô tả: {
             Để quản lý tài khoản của Quản trị viên và các chi nhánh.

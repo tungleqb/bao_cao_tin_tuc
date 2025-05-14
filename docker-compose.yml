@@ -1,0 +1,47 @@
+#version: '3.9'
+
+services:
+  db:
+    image: postgres:14
+    container_name: report_db
+    environment:
+      POSTGRES_USER: report_user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: baocao
+    ports:
+      - "5444:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    container_name: report_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./cert:/cert
+      - ./uploaded_reports:/app/../uploaded_reports
+      - ./scripts:/app/scripts
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://report_user:password@report_db:5432/baocao
+      - SECRET_KEY=Tori@@123!!
+      - CERT_HOST=100.122.41.24
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: report_frontend
+    ports:
+      - "443:443"
+    volumes:
+      - ./cert:/etc/nginx/ssl
+      - ./env-config.js:/usr/share/nginx/html/env-config.js
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  pg_data:

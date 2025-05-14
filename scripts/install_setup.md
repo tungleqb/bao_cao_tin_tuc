@@ -80,3 +80,32 @@ PYTHONPATH=. uvicorn app.main:app --reload
 
 
 mkdir -p backend/app/static/reports
+
+
+
+##FOR WINDOW
+psql -U enterprisedb -h localhost -p 5444 -d postgres
+Username: enterprisedb
+
+Database: postgres
+
+Host: localhost
+
+Port: 5444
+password: password
+
+Xoá database cũ:
+DROP DATABASE IF EXISTS baocao;
+
+Tạo database mới:
+CREATE DATABASE baocao;
+
+CREATE USER report_user WITH PASSWORD 'password';
+
+Cấp quyền sử dụng database baocao cho report_user:
+GRANT ALL PRIVILEGES ON DATABASE baocao TO report_user;
+ALTER SCHEMA public OWNER TO report_user;
+
+#Trong /backend tạo revision init
+alembic revision --autogenerate -m "init database schema"
+

@@ -1,48 +1,60 @@
-# Đặc tả cấu trúc **Loại báo cáo**
+# spec_loaibaocao.txt (cập nhật 28/04/2025)
 
-> Tài liệu nội bộ – dự án **Hệ thống báo cáo tin tức**  
-> Cập nhật: 24 / 04 / 2025
+# Đặc tả cấu trúc **LoaiBaoCao**
+
+> Tài liệu nội bộ - dự án **Hệ thống báo cáo tin tức**
 
 ---
 
 ## 1. Mục đích
 
-Mô tả chuẩn dữ liệu cho bảng/collection **`LoaiBaoCao`** để:
+Mô tả chuẩn dữ liệu cho bảng **`LoaiBaoCao`**:
 
-* đồng bộ backend ↔ frontend;
-* hỗ trợ Scheduler tự động tạo/kết thúc “kỳ báo cáo” (cycle);
-* làm tham chiếu về sau khi mở rộng thêm chu kỳ (quý, năm…).
+- Đồng bộ backend ↔ frontend;
+- Hỗ trợ Scheduler tự động tạo/huỷ kỳ;
+- Hỗ trợ quản lý 2 cấp chi nhánh: `CAPPHONG` và `CAPXA`;
+- Tài liệu bảo trì mã nguồn sau này.
 
----
 
 ## 2. Các trường dữ liệu
 
-| Trường | Kiểu | Bắt buộc | Mô tả | Giá trị mặc định |
+| Trường | Kiểu | Bắt buộc | Mô tả | Mặc định |
 |--------|------|----------|-------|------------------|
-| `ID` | `string` | ✓ | Mã định danh. Có thể đặt theo quy tắc `BCDOTXUAT_<STT>` hoặc chuỗi tuỳ biến (`BCNGAY`, `BCTUAN`…). | — |
-| `DateCreated` | `datetime` | ✓ | Thời điểm tạo loại báo cáo. | `now()` |
-| `Name` | `string` | ✓ | Tên hiển thị: *“Báo cáo ngày”*, *“Báo cáo tuần”…* | — |
-| `Period_ID` | `enum` | ✓ | Xác định chu kỳ: `DAILY`, `WEEKLY`, `MONTHLY`, `NONE`. | `NONE` |
-| `ActiveOn` / `DeactiveOn` | `int` | ✓ | **Ngày** (hoặc **thứ**) mở/kết thúc giai đoạn *cho phép gửi*.<br>• DAILY/NONE → `0`.<br>• WEEKLY → `1–7` (Mon–Sun).<br>• MONTHLY → `1–31`. | 0 |
-| `ActiveAt` / `DeactiveAt` | `time` | ✓ | Giờ:phút:giây mở/kết thúc giai đoạn *cho phép gửi*." | `00:00:00` / `23:59:59` |
-| `StartOn` / `EndOn` | `int` | ✓ | Mốc “đúng hạn” nộp (ngày or thứ) | 0 |
-| `StartAt` / `EndAt` | `time` | ✓ | Khoảng “đúng hạn” nộp (giờ) | — |
-| `FromOn` / `ToOn` | `int` | ✓ | Khoảng **lấy số liệu** (ngày / thứ) | 0 |
-| `From` / `To` | `time` | ✓ | Khoảng **lấy số liệu** (giờ) | `00:00:00` / `23:59:59` |
-| `ActiveOffset` / `DeactiveOffset` | `int` | ✗ | Kỳ lệch so với kỳ hiện hành khi *kích hoạt/huỷ* (−1 → kỳ trước, 0 → kỳ này, 1 → kỳ sau…). | 0 |
-| `StartOffset` / `EndOffset` | `int` | ✗ | Kỳ lệch khoảng “đúng hạn” | 0 |
-| `FromOffset` / `ToOffset` | `int` | ✗ | Kỳ lệch khoảng **lấy số liệu** | 0 |
-| `DocExtList` | `string` | ✗ | Danh sách đuôi file hợp lệ, phân tách bởi dấu cách. | `.doc .docx .pdf .bm2 .jpg .xlsx .xls` |
-| `MaxSize` | `string` | ✗ | Kích thước tối đa file đính kèm (hỗ trợ MB/GB). | `100MB` |
-| `NextAt` | `datetime` | ✗ | Hệ thống ghi nhận lần chạy Scheduler kế tiếp. | — |
+| ID | string | ✓ | Mã định danh | - |
+| DateCreated | datetime | ✓ | Thời điểm tạo | now() |
+| Name | string | ✓ | Tên loại báo cáo | - |
+| Period_ID | enum | ✓ | Chu kỳ: DAILY, WEEKLY, MONTHLY, NONE | NONE |
+| ActiveOn / DeactiveOn | int | ✓ | Ngày/thứ cho phép gửi - CAPPHONG | 0 |
+| ActiveAt / DeactiveAt | time | ✓ | Giờ cho phép gửi - CAPPHONG | 00:00:00 / 23:59:59 |
+| StartOn / EndOn | int | ✓ | Ngày/thứ đúng hạn - CAPPHONG | 0 |
+| StartAt / EndAt | time | ✓ | Giờ đúng hạn - CAPPHONG | - |
+| FromOn / ToOn | int | ✓ | Ngày/thứ lấy số liệu - CAPPHONG | 0 |
+| From / To | time | ✓ | Giờ lấy số liệu - CAPPHONG | 00:00:00 / 23:59:59 |
+| ActiveOffset / DeactiveOffset | int | × | Kỳ lệch - CAPPHONG | 0 |
+| StartOffset / EndOffset | int | × | Kỳ lệch đúng hạn - CAPPHONG | 0 |
+| FromOffset / ToOffset | int | × | Kỳ lệch lấy số liệu - CAPPHONG | 0 |
+| XaActiveOn / XaDeactiveOn | int | × | Ngày/thứ cho phép gửi - CAPXA | 0 |
+| XaActiveAt / XaDeactiveAt | time | × | Giờ cho phép gửi - CAPXA | 00:00:00 / 23:59:59 |
+| XaStartOn / XaEndOn | int | × | Ngày/thứ đúng hạn - CAPXA | 0 |
+| XaStartAt / XaEndAt | time | × | Giờ đúng hạn - CAPXA | - |
+| XaFromOn / XaToOn | int | × | Ngày/thứ lấy số liệu - CAPXA | 0 |
+| XaFrom / XaTo | time | × | Giờ lấy số liệu - CAPXA | 00:00:00 / 23:59:59 |
+| XaActiveOffset / XaDeactiveOffset | int | × | Kỳ lệch - CAPXA | 0 |
+| XaStartOffset / XaEndOffset | int | × | Kỳ lệch đúng hạn - CAPXA | 0 |
+| XaFromOffset / XaToOffset | int | × | Kỳ lệch lấy số liệu - CAPXA | 0 |
+| DocExtList | string | × | Đuôi file hợp lệ | .doc .docx .pdf .bm2 .jpg .xlsx .xls |
+| MaxSize | string | × | Kích thước tối đa file | 100MB |
+| NextAt | datetime | × | Lần scheduler tiếp theo | - |
 
+---
 > **Ghi chú**: Các trường `*Offset` thêm vào để biểu diễn mốc lệch qua kỳ trước/sau, đáp ứng yêu cầu mốc “14 tháng trước → 14 tháng này”, “Thứ Tư tuần trước → Thứ Tư tuần này”…
-
+CAPXA dùng nhóm trường Xa*.
 ---
 
 ## 3. Quy ước giá trị
 
-* **`Period_ID = DAILY` hoặc `NONE`**: mọi trường `*On` = `0`, `*Offset` = `0`.
+* **`Period_ID = DAILY`**: `*On` = '0'. `*Offset` tính theo ngày.
+* **`Period_ID = NONE`**: `*Offset` luôn là '0', `*On` là ngày tháng năm cụ thể. Không lặp theo chu kỳ.
 * **`Period_ID = WEEKLY`**: `*On` mang giá trị **ISO** thứ trong tuần (`1 = Monday` → `7 = Sunday`).
 * **`Period_ID = MONTHLY`**: `*On` = ngày trong tháng (`1–31`).
 * Scheduler sử dụng timezone máy chủ (UTC +07 đối với server VN). Tất cả `time` lưu ở định dạng `HH:MM:SS` 24 h.
@@ -51,65 +63,143 @@ Mô tả chuẩn dữ liệu cho bảng/collection **`LoaiBaoCao`** để:
 
 ## 4. Công thức dựng mốc thời gian
 
-> Pseudocode (Python‑style):
+### 🎯 Mục tiêu:
+Chuyển các thông số cấu hình trong bảng `LoaiBaoCao` (trường `*Offset`, `*On`, `*At`) thành các `datetime` chính xác dùng để tạo `Kỳ báo cáo` theo từng chu kỳ `DAILY`, `WEEKLY`, `MONTHLY`, `NONE`.
+---
+
+### 🧠 Nguyên tắc quy ước
+
+| Period_ID   | Ý nghĩa Offset | Ý nghĩa On                | Quy đổi cụ thể                 |
+|-------------|----------------|---------------------------|--------------------------------|
+| `DAILY`     | Số ngày lệch   | Số ngày cộng thêm (thường là `0`) | Dùng `base_date + offset + on` |
+| `WEEKLY`    | Số tuần lệch   | Thứ trong tuần (1 = Thứ 2 → 7 = CN) | Về thứ Hai gần nhất + `weeks + days` |
+| `MONTHLY`   | Số tháng lệch  | Ngày trong tháng (1–31)   | Về đầu tháng rồi set ngày      |
+| `NONE`      | `Offset = 0`   | Là ngày cụ thể (`date`)   | Không tính theo chu kỳ, dùng nguyên ngày |
+
+---
+
+### 🔧 Hàm tổng quát
 
 ```python
-anchor = get_anchor(period_id, base_date)
+from datetime import datetime, timedelta, time, date
 
-# Ví dụ tính "FromDateTime"
-from_dt = (
-    anchor.shift(weeks=FromOffset) if period_id == "WEEKLY" else anchor.shift(months=FromOffset)
-).replace(day_or_week=FromOn, time=From)
+def calculate_datetime(base_date: datetime, offset: int, on, at: time, period_id: str) -> datetime:
+    if period_id == "NONE":
+        if not isinstance(on, date):
+            raise ValueError("With Period_ID = 'NONE', `on` must be a `datetime.date` object")
+        return datetime.combine(on, at)
+
+    if period_id == "WEEKLY":
+        anchor = base_date - timedelta(days=base_date.weekday())
+        shifted = anchor + timedelta(weeks=offset)
+        if on:
+            shifted += timedelta(days=on - 1)
+
+    elif period_id == "MONTHLY":
+        anchor = base_date.replace(day=1)
+        month = anchor.month + offset
+        year = anchor.year + (month - 1) // 12
+        month = (month - 1) % 12 + 1
+        shifted = anchor.replace(year=year, month=month)
+        if on:
+            shifted = shifted.replace(day=on)
+
+    else:  # DAILY
+        shifted = base_date + timedelta(days=offset)
+        if on:
+            shifted += timedelta(days=on)
+
+    return datetime.combine(shifted.date(), at)
 ```
+---
+### 💡 Hàm dựng toàn bộ mốc thời gian cho một loại báo cáo
+```python
+def generate_all_datetimes(base_date: datetime, rt) -> dict:
+    period_id = rt.Period_ID
+    return {
+        "ActiveAt": calculate_datetime(base_date, rt.ActiveOffset, rt.ActiveOn, rt.ActiveAt, period_id),
+        "DeactiveAt": calculate_datetime(base_date, rt.DeactiveOffset, rt.DeactiveOn, rt.DeactiveAt, period_id),
+        "StartAt": calculate_datetime(base_date, rt.StartOffset, rt.StartOn, rt.StartAt, period_id),
+        "EndAt": calculate_datetime(base_date, rt.EndOffset, rt.EndOn, rt.EndAt, period_id),
+        "FromAt": calculate_datetime(base_date, rt.FromOffset, rt.FromOn, rt.From, period_id),
+        "ToAt": calculate_datetime(base_date, rt.ToOffset, rt.ToOn, rt.To, period_id),
+        "XaActiveAt": calculate_datetime(base_date, rt.XaActiveOffset, rt.XaActiveOn, rt.XaActiveAt, period_id) if rt.XaActiveAt else None,
+        "XaDeactiveAt": calculate_datetime(base_date, rt.XaDeactiveOffset, rt.XaDeactiveOn, rt.XaDeactiveAt, period_id) if rt.XaDeactiveAt else None,
+        "XaStartAt": calculate_datetime(base_date, rt.XaStartOffset, rt.XaStartOn, rt.XaStartAt, period_id) if rt.XaStartAt else None,
+        "XaEndAt": calculate_datetime(base_date, rt.XaEndOffset, rt.XaEndOn, rt.XaEndAt, period_id) if rt.XaEndAt else None,
+        "XaFromAt": calculate_datetime(base_date, rt.XaFromOffset, rt.XaFromOn, rt.XaFromAt, period_id) if rt.XaFromAt else None,
+        "XaToAt": calculate_datetime(base_date, rt.XaToOffset, rt.XaToOn, rt.XaToAt, period_id) if rt.XaToAt else None,
+    }
+```
+---
 
-* `get_anchor()`:
-  * WEEKLY → đầu tuần (thứ 2) của **base_date**.
-  * MONTHLY → 1 st day of month.
-* DAILY/NONE: bỏ qua offset, dùng `datetime.combine(today, time)`.
+### 📌 Ghi chú
+- `base_date` thường là `datetime.now()`, dùng làm mốc tính toán.
+- Tất cả các giá trị thời gian được trả về đều ở định dạng `datetime`, dùng được cho `Period.*At`.
+- Scheduler của hệ thống sẽ tự động gọi hàm này để tạo các kỳ báo cáo theo định kỳ.
 
 ---
 ## 5. Định nghĩa bảng SQL (PostgreSQL)
 CREATE TABLE loai_baocao (
-    id                SERIAL        PRIMARY KEY,
-    code              VARCHAR(50)   UNIQUE NOT NULL,          -- BCNGAY, BCTUAN, ...
-    name              VARCHAR(100)  NOT NULL,
-    period_id         VARCHAR(10)   NOT NULL  -- DAILY|WEEKLY|MONTHLY|NONE
-                     CHECK (period_id IN ('DAILY','WEEKLY','MONTHLY','NONE')),
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(50) UNIQUE NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    period_id VARCHAR(10) NOT NULL CHECK (period_id IN ('DAILY', 'WEEKLY', 'MONTHLY', 'NONE')),
 
-    /*  Mốc KÍCH HOẠT/KẾT THÚC cửa sổ "được phép gửi"  */
-    active_offset     SMALLINT      NOT NULL DEFAULT 0,       -- −1|0|+1 kỳ
-    active_on         SMALLINT      NOT NULL DEFAULT 0,       -- day‑of‑month | ISO‑weekday | 0
-    active_at         TIME          NOT NULL DEFAULT '00:00:00',
+    active_offset SMALLINT DEFAULT 0,
+    active_on SMALLINT DEFAULT 0,
+    active_at TIME NOT NULL DEFAULT '00:00:00',
 
-    deactive_offset   SMALLINT      NOT NULL DEFAULT 0,
-    deactive_on       SMALLINT      NOT NULL DEFAULT 0,
-    deactive_at       TIME          NOT NULL DEFAULT '23:59:59',
+    deactive_offset SMALLINT DEFAULT 0,
+    deactive_on SMALLINT DEFAULT 0,
+    deactive_at TIME NOT NULL DEFAULT '23:59:59',
 
-    /*  Mốc ĐÚNG HẠN gửi báo cáo  */
-    start_offset      SMALLINT      NOT NULL DEFAULT 0,
-    start_on          SMALLINT      NOT NULL DEFAULT 0,
-    start_at          TIME          NOT NULL DEFAULT '00:00:00',
+    start_offset SMALLINT DEFAULT 0,
+    start_on SMALLINT DEFAULT 0,
+    start_at TIME NOT NULL DEFAULT '00:00:00',
 
-    end_offset        SMALLINT      NOT NULL DEFAULT 0,
-    end_on            SMALLINT      NOT NULL DEFAULT 0,
-    end_at            TIME          NOT NULL DEFAULT '23:59:59',
+    end_offset SMALLINT DEFAULT 0,
+    end_on SMALLINT DEFAULT 0,
+    end_at TIME NOT NULL DEFAULT '23:59:59',
 
-    /*  Khoảng LẤY SỐ LIỆU  */
-    from_offset       SMALLINT      NOT NULL DEFAULT 0,
-    from_on           SMALLINT      NOT NULL DEFAULT 0,
-    from_at           TIME          NOT NULL DEFAULT '00:00:00',
+    from_offset SMALLINT DEFAULT 0,
+    from_on SMALLINT DEFAULT 0,
+    from_at TIME NOT NULL DEFAULT '00:00:00',
 
-    to_offset         SMALLINT      NOT NULL DEFAULT 0,
-    to_on             SMALLINT      NOT NULL DEFAULT 0,
-    to_at             TIME          NOT NULL DEFAULT '23:59:59',
+    to_offset SMALLINT DEFAULT 0,
+    to_on SMALLINT DEFAULT 0,
+    to_at TIME NOT NULL DEFAULT '23:59:59',
 
-    doc_ext_list      VARCHAR(255)  NOT NULL DEFAULT '.doc .docx .pdf .bm2 .jpg .xlsx .xls',
-    max_size          VARCHAR(20)   NOT NULL DEFAULT '100MB',
+    xa_active_offset SMALLINT DEFAULT 0,
+    xa_active_on SMALLINT DEFAULT 0,
+    xa_active_at TIME DEFAULT '00:00:00',
 
-    next_at           TIMESTAMPTZ   NULL,   -- lần scheduler kế tiếp
-    created_at        TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+    xa_deactive_offset SMALLINT DEFAULT 0,
+    xa_deactive_on SMALLINT DEFAULT 0,
+    xa_deactive_at TIME DEFAULT '23:59:59',
+
+    xa_start_offset SMALLINT DEFAULT 0,
+    xa_start_on SMALLINT DEFAULT 0,
+    xa_start_at TIME DEFAULT '00:00:00',
+
+    xa_end_offset SMALLINT DEFAULT 0,
+    xa_end_on SMALLINT DEFAULT 0,
+    xa_end_at TIME DEFAULT '23:59:59',
+
+    xa_from_offset SMALLINT DEFAULT 0,
+    xa_from_on SMALLINT DEFAULT 0,
+    xa_from_at TIME DEFAULT '00:00:00',
+
+    xa_to_offset SMALLINT DEFAULT 0,
+    xa_to_on SMALLINT DEFAULT 0,
+    xa_to_at TIME DEFAULT '23:59:59',
+
+    doc_ext_list VARCHAR(255) NOT NULL DEFAULT '.doc .docx .pdf .bm2 .jpg .xlsx .xls',
+    max_size VARCHAR(20) NOT NULL DEFAULT '100MB',
+
+    next_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
-
 
 ##6 · Tài liệu tham khảo nhanh API
 
@@ -120,114 +210,3 @@ CREATE TABLE loai_baocao (
 | `PUT` | `/admin/loaibaocao/{id}` | Cập nhật |
 | `DELETE` | `/admin/loaibaocao/{id}` | Xoá |
 
-##7 . Ví dụ cấu hình
-
-### 7.1. Báo cáo **ngày** (định kỳ 24 h)
-```json
-{
-  "ID": "BCNGAY",
-  "DateCreated": "00:00:00 12/4/2025",
-  "Name": "Báo cáo ngày",
-  "Period_ID": "DAILY",
-
-  "ActiveOffset": 0,
-  "ActiveOn": 0,
-  "ActiveAt": "00:00:00",
-
-  "DeactiveOffset": 0,
-  "DeactiveOn": 0,
-  "DeactiveAt": "23:59:59",
-
-  "StartOffset": 0,
-  "StartOn": 0,
-  "StartAt": "12:00:00",
-
-  "EndOffset": 0,
-  "EndOn": 0,
-  "EndAt": "14:00:00",
-
-  "FromOffset": 0,
-  "FromOn": 0,
-  "From": "00:00:00",
-
-  "ToOffset": 0,
-  "ToOn": 0,
-  "To": "23:59:59",
-
-  "DocExtList": ".doc .docx .pdf .bm2 .jpg .xlsx .xls",
-  "MaxSize": "100MB",
-  "NextAt": "00:00:00 25/4/2025"
-}
-### 7.2. Báo cáo **tuần**
-```json
-{
-  "ID": "BCTUAN",
-  "DateCreated": "00:00:00 12/4/2025",
-  "Name": "Báo cáo tuần",
-  "Period_ID": "WEEKLY",
-
-  "ActiveOffset": 0,
-  "ActiveOn": 3,
-  "ActiveAt": "00:00:00",
-
-  "DeactiveOffset": 1,
-  "DeactiveOn": 3,
-  "DeactiveAt": "18:00:00",
-
-  "StartOffset": 0,
-  "StartOn": 3,
-  "StartAt": "08:00:00",
-
-  "EndOffset": 1,
-  "EndOn": 3,
-  "EndAt": "18:00:00",
-
-  "FromOffset": -1,
-  "FromOn": 3,
-  "From": "00:00:00",
-
-  "ToOffset": 1,
-  "ToOn": 3,
-  "To": "00:00:00",
-
-  "DocExtList": ".doc .docx .pdf .bm2 .jpg .xlsx .xls",
-  "MaxSize": "100MB",
-  "NextAt": "00:00:00 Thứ Tư tuần tới"
-}
-### 7.3. Báo cáo **tháng**
-```json
-{
-  "ID": "BCTHANG",
-  "DateCreated": "00:00:00 12/4/2025",
-  "Name": "Báo cáo tháng",
-  "Period_ID": "MONTHLY",
-
-  "ActiveOffset": 0,
-  "ActiveOn": 14,
-  "ActiveAt": "00:00:00",
-
-  "DeactiveOffset": 0,
-  "DeactiveOn": 16,
-  "DeactiveAt": "16:00:00",
-
-  "StartOffset": 0,
-  "StartOn": 14,
-  "StartAt": "12:00:00",
-
-  "EndOffset": 0,
-  "EndOn": 16,
-  "EndAt": "16:00:00",
-
-  "FromOffset": -1,
-  "FromOn": 14,
-  "From": "00:00:00",
-
-  "ToOffset": 1,
-  "ToOn": 14,
-  "To": "00:00:00",
-
-  "DocExtList": ".doc .docx .pdf .bm2 .jpg .xlsx .xls",
-  "MaxSize": "100MB",
-  "NextAt": "00:00:00 14/5/2025"
-}
-```

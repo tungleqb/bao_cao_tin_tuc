@@ -2,6 +2,7 @@ from sqlalchemy import Column, String, Integer, DateTime, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from ..database import Base
 
+
 class Report(Base):
     __tablename__ = "reports"
 
@@ -18,7 +19,7 @@ class Report(Base):
     FileSize = Column(Integer, nullable=False)
     SentAt = Column(DateTime(timezone=True), nullable=False)
     Comment = Column(String, nullable=True)
-    HasEvent = Column(Boolean, default=True)
+    HasEvent = Column(Boolean, default=False)
     LateSeconds = Column(Integer, default=0)
 
     period = relationship("Period", back_populates="reports")

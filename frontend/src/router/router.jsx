@@ -1,34 +1,27 @@
 import { createBrowserRouter } from "react-router-dom";
-import App from "../App";
-import LoginPage from "../pages/LoginPage";
-import AdminAccounts from "../pages/AdminAccounts";
-import UploadReport from "../pages/UploadReport";
-import AdminLoaiBaoCao from "../pages/AdminLoaiBaoCao";
-import AdminYeuCauBaoCao from "../pages/AdminYeuCauBaoCao";
-
+import LoginBranch from "../pages/LoginBranch";
+import LoginAdmin from "../pages/LoginAdmin";
+import UserDashboard from "../pages/UserDashboard"; // 🆕 Thêm dòng này
+import AdminDashboard from "../pages/AdminDashboard"; // 🆕 Thêm dòng này
 export const router = createBrowserRouter([
   {
     path: "/",
-    element: <LoginPage />,
+    element: <LoginBranch />,
   },
   {
-    path: "/dashboard",
-    element: <App />,
+    path: "/login/branch",
+    element: <LoginBranch />,
   },
   {
-    path: "/admin/accounts",
-    element: <AdminAccounts />,
+    path: "/login/admin",
+    element: <LoginAdmin />,
   },
   {
-    path: "/admin/loaibaocao",
-    element: <AdminLoaiBaoCao />,
+    path: "/user/dashboard", // 🆕 Route mới cho chi nhánh sau khi đăng nhập
+    element: <UserDashboard />,
   },
   {
-    path: "/admin/yeucau",
-    element: <AdminYeuCauBaoCao />,
+    path: "/admin/dashboard", // 🆕 Route mới cho chi nhánh sau khi đăng nhập
+    element: <AdminDashboard />,
   },
-  {
-    path: "/upload-report",
-    element: <UploadReport />,
-  }
 ]);

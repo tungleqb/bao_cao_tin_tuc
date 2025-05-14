@@ -1,141 +1,145 @@
-**ROADMAP TONG THE VA CHI TIET - DU AN BAO CAO TIN TUC (CAP NHAT MOI)**
-
-# 1. GIAI DOAN 1: CAP NHAT CO SO DU LIEU
-
-## Buoc 1.1: Tao model Period va update model Report
-- Tao file `backend/app/models/period.py`.
-- Cap nhat file `backend/app/models/report.py` de dung theo format moi (Sender, SendID, PeriodID, ...).
-
-**Kiem tra:**
-- Khoi tao doi tuong Period bang tay trong Python shell.
-- Khoi tao doi tuong Report moi voi du lieu day du.
-
-## Buoc 1.2: Tao Alembic Migration
-- Sinh file migration tu dong: `alembic revision --autogenerate -m "create period table and update report table"`
-- Chay `alembic upgrade head`.
-
-**Kiem tra:**
-- Kiem tra PostgreSQL: xuat hien bang `periods` va update bang `reports`.
+# ROADMAP TỔNG THỂ - DỰ ÁN HỆ THỐNG BÁO CÁO TIN TỨC (CẬP NHẬT 2025-04-27)
 
 ---
 
-# 2. GIAI DOAN 2: CAP NHAT BACKEND API
+# 1. GIAI ĐOẠN 1: THIẾT KẾ LẠI BACKEND CƠ BẢN
 
-## Buoc 2.1: CRUD cho Period
-- Tao file `backend/app/routers/period.py`.
-- Tao schema `backend/app/schemas/period.py`.
-- Tao route: GET, POST, PUT, DELETE Period.
+## Bước 1.1: Hoàn thiện Model
+- Xây dựng models:
+  - `report_type.py`
+  - `period.py`
+  - `report.py`
+  - `user.py`
+  - `audit_log.py`
 
-**Kiem tra:**
-- Dung Swagger UI test: tao, cap nhat, xoa 1 Period thanh cong.
+**Kiểm tra:**
+- Tạo object thử nghiệm trong Python shell.
+- Kiểm tra field đúng định nghĩa theo `Cautruc_logic.txt` và `spec_loaibaocao.txt`.
 
-## Buoc 2.2: APIs Upload Report theo Period
-- Cap nhat API `/report/upload`:
-  - Nhan thong tin PeriodID.
-  - Tinh toan LateSeconds.
-  - Luu file vao folder cua Period.
-  - Sinh checksum Blake3 cho file.
+## Bước 1.2: Tạo Alembic Migration
+- Tạo migration để tạo mới tất cả các bảng.
 
-**Kiem tra:**
-- Upload file tren Swagger UI: kiem tra file duoc luu dung thu muc, dung dinh dang Report.
-
-## Buoc 2.3: APIs lay lich su bao cao user
-- Them API `/user/reports`:
-  - Lay danh sach cac bao cao da gui cua user hien tai.
-
-**Kiem tra:**
-- Test API lay danh sach bao cao cua user trong Swagger UI.
-
-## Buoc 2.4: APIs Periods dang kich hoat
-- Them API `/period/active`:
-  - Tra ve danh sach cac ky dang active cua user hien tai.
-
-**Kiem tra:**
-- Test API tra ve danh sach dung ky dang kich hoat.
+**Kiểm tra:**
+- Chạy `alembic upgrade head`.
+- Kiểm tra PostgreSQL đầy đủ các bảng và cột đúng.
 
 ---
 
-# 3. GIAI DOAN 3: THEM TU DONG HOA (SCHEDULER)
+# 2. GIAI ĐOẠN 2: XÂY DỰNG API BACKEND
 
-## Buoc 3.1: Tich hop APScheduler
-- Cai dat APScheduler vao FastAPI.
-- Dinh nghia job:
-  - Tu dong tao Period khi den ActiveAt.
-  - Tu dong huy Period khi den DeactiveAt.
+## Bước 2.1: CRUD Loại Báo Cáo
+- Endpoint: `/admin/loaibaocao`
 
-**Kiem tra:**
-- Tao mot Period co thoi diem ActiveAt trong 2 phut toi.
-- Cho he thong tu kich hoat va huy Period do.
+## Bước 2.2: CRUD User
+- Endpoint: `/admin/user`
 
----
+## Bước 2.3: API cho Period
+- `/period/active`
+- `/period/create_auto`
 
-# 4. GIAI DOAN 4: CAP NHAT FRONTEND
+## Bước 2.4: API cho Report
+- `/report/upload`
+- `/user/reports`
 
-## Buoc 4.1: Cap nhat luong dang nhap
-- Neu user la Admin -> vao dashboard admin.
-- Neu user la chi nhanh -> vao UserHomePage.
+## Bước 2.5: API AuditLog
+- `/admin/auditlogs`
 
-**Kiem tra:**
-- Dang nhap voi 2 loai user: chuyen dung giao dien tuong ung.
-
-## Buoc 4.2: Xay dung trang UserHomePage
-- Sidebar trai: danh sach Period dang active.
-- Noi dung chinh: giao dien Upload Report theo Period.
-- Header: thong tin user, menu nho.
-
-**Kiem tra:**
-- Dang nhap, xem danh sach ky, upload bao cao moi, kiem tra file upload.
-
-## Buoc 4.3: Trang lich su bao cao (ReportHistory)
-- Danh sach bao cao da gui.
-- Loc theo Period.
-- Phan trang neu du lieu lon.
-
-**Kiem tra:**
-- Vao trang xem lich su bao cao, loc du lieu.
-
-## Buoc 4.4: Admin quan ly Kỳ báo cáo (AdminPeriods.jsx)
-- Giao dien tao, cap nhat, xoa, kich hoat ky bao cao.
-
-**Kiem tra:**
-- Tao ky moi, sua ky, xoa ky.
+**Kiểm tra:**
+- Test trên Swagger UI từng API.
+- Gửi request mẫu POST/GET/PUT/DELETE thành công.
 
 ---
 
-# 5. GIAI DOAN 5: KIEM THU TONG THE
+# 3. GIAI ĐOẠN 3: THIẾT LẬP SCHEDULER
 
-## Buoc 5.1: Viet script kiem thu Backend
-- Test API upload bao cao.
-- Test API lich su bao cao.
-- Test API tu dong tao/huy Period.
+## Tích hợp APScheduler vào Backend
+- Tự động:
+  - Tạo và kích hoạt Period khi đến ActiveAt.
+  - Hủy kích hoạt Period khi đến mốc hủy.
 
-**Kiem tra:**
-- Chay script -> tat ca test pass.
-
-## Buoc 5.2: Viet script kiem thu Frontend
-- Test tu dong login, upload file, xem lich su.
-
-**Kiem tra:**
-- Tat ca luong tu dong hoan tat khong loi.
+Chú ý tạo các log để dễ debug và kiểm thử bằng tay.
 
 ---
 
-# 6. GIAI DOAN 6: HOAN THIEN
+# 4. GIAI ĐOẠN 4: XÂY DỰNG FRONTEND
 
-## Buoc 6.1: Export Excel thong ke bao cao
-- Chuc nang xuat thong ke ky bao cao ra file Excel.
+## Bước 4.1: Đăng nhập (LoginPage.jsx)
+### 4.1.1: Đăng nhập cho tài khoản chi nhánh
+- Nhập tài khoản/mật khẩu, checkbox ghi nhớ.
+- Sau khi đăng nhập: UserDashboard.jsx.
+### 4.1.2: Đăng nhập cho tài khoản quản trị
+- Nhập tài khoản/mật khẩu, checkbox ghi nhớ.
+- Sau khi đăng nhập: AdminDashboard.jsx.
+**Kiểm tra:**
+- Đăng nhập đúng role chuyển đúng giao diện.
 
-**Kiem tra:**
-- Xuat file Excel, mo file dung du lieu.
+## Bước 4.2: Trang UserDashboard.jsx
+- Sidebar danh sách kỳ báo cáo.
+- Nội dung chính: form gửi báo cáo.
+- Header thông tin tài khoản, đổi mật khẩu, nhật ký gửi.
 
-## Buoc 6.2: Cap nhat README, huong dan su dung
-- Cap nhat tai lieu README.md.
-- Bo sung cac API moi.
+## Bước 4.3: Form đổi mật khẩu (ChangePassword.jsx)
+- Đổi mật khẩu.
 
-**Kiem tra:**
-- Mo README, doc day du cac buoc huong dan.
+## Bước 4.4: Trang lịch sử gửi báo cáo (ReportHistory.jsx)
+- Lọc theo kỳ, phân trang.
+
+**Kiểm tra:**
+- Đăng nhập, gửi báo cáo, xem lịch sử, đổi mật khẩu thành công.
+
+## Bước 4.5: Trang AdminDashboard.jsx
+- Sidebar:
+  - Quản lý tài khoản chi nhánh (AdminAccounts.jsx)
+  - Quản lý loại báo cáo (AdminLoaiBaoCao.jsx)
+  - Quản lý kỳ báo cáo (AdminPeriods.jsx)
+  - Quản lý báo cáo đã nhận (AdminReports.jsx)
+  - Nhật ký thao tác (AdminAuditLog.jsx)
+
+**Kiểm tra:**
+- CRUD đầy đủ các bảng từ giao diện Admin.
 
 ---
 
-# Ket thuc Roadmap
+# 5. GIAI ĐOẠN 5: KIỂM THỬ TỔNG THỂ
+
+## Bước 5.1: Viết script kiểm thử Backend
+- Test API upload báo cáo.
+- Test API lịch sử báo cáo.
+- Test API tự động tạo/huỷ kỳ.
+
+**Kiểm tra:**
+- Chạy script, tất cả test pass.
+
+## Bước 5.2: Viết script kiểm thử Frontend
+- Test đăng nhập, upload file, xem lịch sử.
+
+**Kiểm tra:**
+- Tất cả luồng tự động hoàn tất không lỗi.
+
+---
+
+# 6. GIAI ĐOẠN 6: HOÀN THIỆN
+
+## Bước 6.1: Export Excel thống kê báo cáo
+- Sử dụng `openpyxl` hoặc `pandas`.
+
+**Kiểm tra:**
+- Xuất file Excel, mở file đúng dữ liệu.
+
+## Bước 6.2: Cập nhật README
+- Hướng dẫn setup, chạy local, deploy.
+
+**Kiểm tra:**
+- Đọc README, thực hiện đầy đủ.
+
+---
+
+# GHI CHÚ
+- Backend: FastAPI + PostgreSQL + APScheduler.
+- Frontend: ReactJS + TailwindCSS + Vite.
+- Storage: File local (có thể mở rộng S3).
+- Xác thực: JWT OAuth2.
+- Đặt tên biến, cột, bảng bằng tiếng Anh thống nhất.
+
+# Kết thúc Roadmap
 

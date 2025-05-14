@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.git/
+.env
+cert/
+venv/
+node_modules
+dist
+cert
+.vite
+.env
+.git
+*.log
