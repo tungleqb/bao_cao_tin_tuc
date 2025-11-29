@@ -14,3 +14,5 @@ python-multipart
 bcrypt==3.2.2
 aiofiles
 apscheduler
+pandas
+openpyxl

@@ -1,8 +1,4 @@
 
-===== FILE: backend/.env =====
-DATABASE_URL=postgresql+asyncpg://report_user:password@localhost:5444/baocao
-SECRET_KEY=Tori@@123!!
-
 ===== FILE: backend/alembic.ini =====
 [alembic]
 script_location = alembic
@@ -57,22 +53,26 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     curl \
     unzip \
-	nano \
+    nano \
  && rm -rf /var/lib/apt/lists/*
+# ✅ THAY ĐỔI: dùng /backend thay vì /app
+WORKDIR /backend
 
-WORKDIR /app
-
-COPY requirements.txt /app/requirements.txt
+COPY requirements.txt ./requirements.txt
 RUN pip install --upgrade pip \
  && pip install -r requirements.txt
- 
-COPY . /app
-COPY start.sh /app/start.sh
-RUN chmod +x /app/start.sh
+
+# ✅ copy toàn bộ mã vào /backend
+COPY . .
+
+# ✅ đảm bảo có quyền thực thi
+RUN chmod +x start.sh
 
 EXPOSE 8000
 
-CMD ["/app/start.sh"]
+# ✅ chạy start.sh tại WORKDIR=/backend
+CMD ["./start.sh"]
+
 
 
 ===== FILE: backend/requirements.txt =====
@@ -92,7 +92,8 @@ python-multipart
 bcrypt==3.2.2
 aiofiles
 apscheduler
-
+pandas
+openpyxl
 
 ===== FILE: backend/start.sh =====
 #!/bin/bash
@@ -124,42 +125,6 @@ exec uvicorn app.main:app \
     --ssl-keyfile "$CERT_KEY" \
     --ssl-certfile "$CERT_CRT"
 
-
-===== FILE: backend/.pytest_cache\.gitignore =====
-# Created by pytest automatically.
-*
-
-
-===== FILE: backend/.pytest_cache\CACHEDIR.TAG =====
-Signature: 8a477f597d28d172789f06886806bc55
-# This file is a cache directory tag created by pytest.
-# For information about cache directory tags, see:
-#	https://bford.info/cachedir/spec.html
-
-
-===== FILE: backend/.pytest_cache\README.md =====
-# pytest cache directory #
-
-This directory contains data from the pytest's cache plugin,
-which provides the `--lf` and `--ff` options, as well as the `cache` fixture.
-
-**Do not** commit this to version control.
-
-See [the docs](https://docs.pytest.org/en/stable/how-to/cache.html) for more information.
-
-
-===== FILE: backend/.pytest_cache\v\cache\lastfailed =====
-{}
-
-===== FILE: backend/.pytest_cache\v\cache\nodeids =====
-[
-  "test/test_period.py::test_crud_period",
-  "test/test_report_type_api.py::test_crud_report_type",
-  "test/test_user_api.py::test_crud_user"
-]
-
-===== FILE: backend/.pytest_cache\v\cache\stepwise =====
-[]
 
 ===== FILE: backend/alembic\env.py =====
 import sys
@@ -614,10 +579,13 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 ===== FILE: backend/app\main.py =====
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import admin_user, admin_report_type, period, report, auth, admin_audit_log
-from fastapi.openapi.utils import get_openapi
+from .routers import admin_reporttype, admin_audit_log, admin_period, admin_report, admin_user, period, report, auth, utils
 from .scheduler import start_scheduler
 from contextlib import asynccontextmanager
+import os
+cors_origins = os.getenv("CORS_ALLOW_ORIGINS", "")
+origin_list = [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     start_scheduler()
@@ -628,46 +596,21 @@ app = FastAPI(lifespan=lifespan)
 #app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origin_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
+app.include_router(admin_period.router)
 app.include_router(admin_user.router)
-app.include_router(admin_report_type.router)
+app.include_router(admin_reporttype.router)
 app.include_router(admin_audit_log.router)
+app.include_router(admin_report.router)
 app.include_router(period.router)
 app.include_router(report.router)
 app.include_router(auth.router)
-
-
-# ✅ Custom OpenAPI để Swagger gửi token
-def custom_openapi():
-    if app.openapi_schema:
-        return app.openapi_schema
-    openapi_schema = get_openapi(
-        title="Report System API",
-        version="1.0.0",
-        description="API backend hệ thống báo cáo.",
-        routes=app.routes,
-    )
-    openapi_schema["components"]["securitySchemes"] = {
-        "BearerAuth": {
-            "type": "http",
-            "scheme": "bearer",
-            "bearerFormat": "JWT",
-        }
-    }
-    for path in openapi_schema["paths"].values():
-        for method in path.values():
-            if isinstance(method, dict):  # bảo vệ chống lỗi
-                method["security"] = [{"BearerAuth": []}]  # ✅ Bắt buộc thêm security
-    app.openapi_schema = openapi_schema
-    return app.openapi_schema
-
-app.openapi = custom_openapi
+app.include_router(utils.router)
 
 
 ===== FILE: backend/app\scheduler.py =====
@@ -684,7 +627,7 @@ from .crud.period import get_all_periods, update_period_status
 from .crud.period_create import create_period_if_needed
 
 logger = logging.getLogger("scheduler")
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.ERROR)
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s"))
 logger.addHandler(handler)
@@ -716,24 +659,25 @@ def job_exists(job_id: str):
     return scheduler.get_job(job_id) is not None
 
 async def schedule_existing_periods():
+    logger.info("Bắt đầu schedule_existing_periods")
     try:
         async with async_session() as db:
             now = datetime.now(timezone.utc)
 
-            print("⏳ Gọi create_period_if_needed PHONG")
+            logger.info("⏳ Gọi create_period_if_needed PHONG")
             await create_period_if_needed(db=db, cap="CAPPHONG", now=now)
 
-            print("⏳ Gọi create_period_if_needed XA")
+            logger.info("⏳ Gọi create_period_if_needed XA")
             await create_period_if_needed(db=db, cap="CAPXA", now=now)
 
-            print("⏳ Gọi get_all_periods")
+            logger.info("⏳ Gọi get_all_periods")
             periods = await get_all_periods(db)
 
-            print(f"✅ Số lượng periods: {len(periods)}")
-            print(">>> Dữ liệu periods:", periods)
+            logger.info(f"✅ Số lượng periods: {len(periods)}")
+            logger.info(f">>> Dữ liệu periods: {periods}")
             for p in periods:
-                print("⛳ Period ID:", getattr(p, "ID", p))  # tránh lỗi crash nếu không phải object
-                print(f"📅 Scheduling activate-status-{p.ID} at {p.ActiveAt}")
+                logger.info(f"⛳ Period ID: {getattr(p, 'ID', p)}")  # tránh lỗi crash nếu không phải object
+                logger.info(f"📅 Scheduling activate-status-{p.ID} at {p.ActiveAt}")
                 # Status jobs (CAPPHONG)
                 if p.ActiveAt and p.ActiveAt > now:
                     job_id = f"activate-status-{p.ID}"
@@ -791,9 +735,9 @@ async def schedule_existing_periods():
                             args=[p.ID],
                             id=job_id
                         )
-        print("✅ schedule_existing_periods SUCCESS")
+        logger.info("✅ schedule_existing_periods SUCCESS")
     except Exception as e:
-        print(f"❌ schedule_existing_periods FAILED: {e}")
+        logger.info(f"❌ schedule_existing_periods FAILED: {e}")
 def start_scheduler():
     scheduler.start()
 
@@ -805,7 +749,7 @@ def start_scheduler():
 
     scheduler.add_job(
         schedule_again,
-        trigger=IntervalTrigger(seconds=180),
+        trigger=IntervalTrigger(seconds=30),
         id="period-rescheduler",
         replace_existing=True
     )
@@ -819,6 +763,7 @@ from ..models.audit_log import AuditLog
 from ..schemas.audit_log import AuditLogCreate
 from sqlalchemy.future import select
 from sqlalchemy import update, delete
+from datetime import datetime, timedelta, timezone
 
 async def create_audit_log(db: AsyncSession, audit_log_in: AuditLogCreate):
     try:
@@ -834,7 +779,10 @@ async def create_audit_log(db: AsyncSession, audit_log_in: AuditLogCreate):
     
 async def get_audit_logs(db: AsyncSession):
     try:
-        result = await db.execute(select(AuditLog))
+        one_week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).replace(tzinfo=None)
+        result = await db.execute(
+            select(AuditLog).where(AuditLog.timestamp >= one_week_ago)
+        )
         return result.scalars().all()
     except Exception as e:
         print(f"❌ Error fetching audit logs: {e}")
@@ -961,7 +909,7 @@ from ..utils.period_utils import generate_all_datetimes
 from pathlib import Path
 import os
 
-BASE_REPORT_FOLDER = "..\\uploaded_reports"
+BASE_REPORT_FOLDER = "../uploaded_reports"
 
 async def get_valid_report_types(db: AsyncSession, cap: str, now: datetime):
     try:
@@ -1007,10 +955,16 @@ async def create_period_if_needed(db: AsyncSession, cap: str, now: datetime):
 
             folder_path = os.path.join(BASE_REPORT_FOLDER, new_id)
             os.makedirs(folder_path, exist_ok=True)
-
+            pr_name = f"{rt.Name}"
+            if rt.Period_ID == "DAILY":
+                pr_name = f"{rt.Name} - {datetimes['ActiveAt'].strftime('%d/%m/%Y')}"
+            elif rt.Period_ID == "WEEKLY":
+                pr_name = f"{rt.Name} từ {datetimes['FromAt'].strftime('%d/%m/%Y')} đến {datetimes['ToAt'].strftime('%d/%m/%Y')}"
+            elif rt.Period_ID == "MONTHLY":
+                pr_name = f"{rt.Name} - {datetimes['ActiveAt'].strftime('%m/%Y')}"
             period = Period(
                 ID=new_id,
-                Name=f"{rt.Name} - {datetimes['ActiveAt'].strftime('%d/%m/%Y')}",
+                Name=pr_name,
                 TYPE=rt.ID,
                 ActiveAt=datetimes["ActiveAt"],
                 DeactiveAt=datetimes["DeactiveAt"],
@@ -1059,6 +1013,7 @@ from ..models.period import Period
 from ..schemas.report import ReportCreate, ReportUpdate
 from sqlalchemy import func
 from ..models.report import Report
+from ..models.user import User  # đầu file
 
 async def create_report(db: AsyncSession, report_in: ReportCreate):
     # Check if Report ID already exists
@@ -1072,6 +1027,12 @@ async def create_report(db: AsyncSession, report_in: ReportCreate):
         if not period_check.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="Period ID does not exist")
 
+        # ✅ Check if user is locked
+        user_check = await db.execute(select(User).where(User.id == report_in.SendID))
+        user = user_check.scalar_one_or_none()
+        if not user or user.is_locked:
+            raise HTTPException(status_code=403, detail="Tài khoản đã bị khóa, không thể gửi báo cáo.")
+        
         report = Report(**report_in.model_dump())
         db.add(report)
         await db.commit()
@@ -1146,9 +1107,11 @@ async def update_period_status(db: AsyncSession, period_id: str, status: str = N
 async def get_report_by_sender_and_period(db: AsyncSession, sender: str, period_id: str):
     try:
         result = await db.execute(
-            select(Report).where(Report.Sender == sender, Report.PeriodID == period_id)
+            select(Report)
+            .where(Report.Sender == sender, Report.PeriodID == period_id)
+            .order_by(Report.SentAt.desc())
         )
-        return result.scalar_one_or_none()
+        return result.scalars().first()
     except Exception as e:  
         print(f"❌ Error fetching report by sender and period: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -1201,6 +1164,8 @@ from ..models.report_type import ReportType
 from ..schemas.report_type import ReportTypeCreate, ReportTypeUpdate
 from datetime import datetime
 from uuid import uuid4
+from ..crud.period_create import create_period_if_needed  # thêm dòng này
+from datetime import datetime, timezone  # sửa nếu chưa có timezone
 
 async def create_report_type(db: AsyncSession, report_type_in: ReportTypeCreate):
     try:
@@ -1223,6 +1188,11 @@ async def create_report_type(db: AsyncSession, report_type_in: ReportTypeCreate)
         db.add(report_type)
         await db.commit()
         await db.refresh(report_type)
+         # ✅ Sau khi tạo xong → thử tạo kỳ báo cáo nếu đang trong thời gian hợp lệ
+        now = datetime.now(timezone.utc)
+        await create_period_if_needed(db, cap="CAPPHONG", now=now)
+        await create_period_if_needed(db, cap="CAPXA", now=now)
+
         return report_type
     except Exception as e:  
         print(f"❌ Error creating report type: {e}")
@@ -1364,15 +1334,15 @@ from ..database import get_db
 from ..schemas.user import UserOut
 from ..services.auth import decode_token
 from ..crud.user import get_user
+from fastapi import Request
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/admin/user/login")
+#oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/admin/user/login")
 
-async def get_current_user(token: str = Security(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> UserOut:
+async def get_current_user(request: Request, db: AsyncSession = Depends(get_db)) -> UserOut:
     try:
-        print(f"🧪 TOKEN RECEIVED = {token}")
+        token = request.cookies.get("access_token")
         if not token:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authentication token")
-
         try:
             payload = decode_token(token)
             user_id_raw = payload.get("sub")
@@ -1577,6 +1547,7 @@ class User(Base):
     avatar = Column(String, nullable=True)
     level = Column(String, nullable=True)
     is_admin = Column(Boolean, default=False)
+    is_locked = Column(Boolean, default=False)
 
 
 ===== FILE: backend/app\models\__init__.py =====
@@ -1602,7 +1573,7 @@ router = APIRouter(
     tags=["Admin-AuditLog"]
 )
 
-@router.get("/", response_model=list[AuditLogOut])
+@router.get("", response_model=list[AuditLogOut])
 async def read_audit_logs(db: AsyncSession = Depends(get_db), user: UserOut = Depends(get_current_admin)):
     logs = None
     try:
@@ -1615,24 +1586,328 @@ async def read_audit_logs(db: AsyncSession = Depends(get_db), user: UserOut = De
     return logs
 
 
-===== FILE: backend/app\routers\admin_report_type.py =====
+===== FILE: backend/app\routers\admin_period.py =====
+import os
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
+from sqlalchemy.exc import IntegrityError
+from datetime import datetime, timezone
+from ..schemas.period import PeriodCreate, PeriodUpdate, PeriodOut
+from ..models.period import Period
+from ..crud import period as crud_period
+from ..database import get_db
+from ..dependencies.auth import get_current_admin
+from ..schemas.user import UserOut
+
+
+from ..schemas.audit_log import AuditLogCreate
+from ..crud import audit_log as crud_audit_log
+from datetime import datetime, timezone
+
+router = APIRouter(prefix="/admin/period", tags=["Admin period"])
+
+@router.post("", response_model=PeriodOut)
+async def create_period(period_in: PeriodCreate, db: AsyncSession = Depends(get_db),
+                        user: UserOut = Depends(get_current_admin)):
+    try:
+        if not user.is_admin:
+            raise HTTPException(status_code=403, detail="Permission denied")
+        exists = await db.execute(select(Period).where(Period.ID == period_in.ID))
+        if exists.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Period ID already exists")
+
+        period = Period(**period_in.model_dump())
+        db.add(period)
+        try:
+            await db.commit()
+            await db.refresh(period)
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(status_code=400, detail="Invalid period creation")
+        
+        now = datetime.now(timezone.utc)
+        await crud_audit_log.create_audit_log(db, AuditLogCreate(
+            user_id=user.id,
+            action=f"/admin/period",
+            model="post",
+            model_id=user.username,
+            details=f"Create period {period.Name}",
+            timestamp=now.replace(tzinfo=None)
+        ))
+        return period
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating period: {str(e)}")
+
+@router.get("", response_model=list[PeriodOut])
+async def get_periods(db: AsyncSession = Depends(get_db), user: UserOut = Depends(get_current_admin)):
+    try:
+        if not user.is_admin:
+            raise HTTPException(status_code=403, detail="Permission denied")
+        result = await db.execute(select(Period))
+        return result.scalars().all()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching periods: {str(e)}")
+
+@router.get("/active", response_model=list[PeriodOut])
+async def get_all_active_periods(
+    db: AsyncSession = Depends(get_db),
+    user: UserOut = Depends(get_current_admin)
+):
+    try:
+        now = datetime.now(timezone.utc)
+
+        stmt = select(Period).where(
+            (
+                (Period.Status == "Active") &
+                (Period.ActiveAt.isnot(None)) &
+                (Period.DeactiveAt.isnot(None)) &
+                (Period.ActiveAt <= now) &
+                (Period.DeactiveAt >= now)
+            ) |
+            (
+                (Period.XaStatus == "Active") &
+                (Period.XaActiveAt.isnot(None)) &
+                (Period.XaDeactiveAt.isnot(None)) &
+                (Period.XaActiveAt <= now) &
+                (Period.XaDeactiveAt >= now)
+            )
+        )
+
+        result = await db.execute(stmt)
+        return result.scalars().all()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching active periods: {str(e)}")
+
+@router.get("/{period_id}", response_model=PeriodOut)
+async def get_period(period_id: str, db: AsyncSession = Depends(get_db), user: UserOut = Depends(get_current_admin)):
+    try:
+        if not user.is_admin:
+            raise HTTPException(status_code=403, detail="Permission denied")
+        result = await db.execute(select(Period).where(Period.ID == period_id))
+        period = result.scalar_one_or_none()
+        if not period:
+            raise HTTPException(status_code=404, detail="Period not found")
+        return period
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching period: {str(e)}")
+
+@router.put("/{period_id}", response_model=PeriodOut)
+async def update_period(period_id: str, period_in: PeriodUpdate, db: AsyncSession = Depends(get_db), user: UserOut = Depends(get_current_admin)):
+    try:
+        if not user.is_admin:
+            raise HTTPException(status_code=403, detail="Permission denied")
+        result = await db.execute(select(Period).where(Period.ID == period_id))
+        period = result.scalar_one_or_none()
+        if not period:
+            raise HTTPException(status_code=404, detail="Period not found")
+
+        update_data = period_in.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(period, key, value)
+        try:
+            await db.commit()
+            await db.refresh(period)
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(status_code=400, detail="Invalid data update")
+        
+        now = datetime.now(timezone.utc)
+        await crud_audit_log.create_audit_log(db, AuditLogCreate(
+            user_id=user.id,
+            action=f"/admin/period/{period_id}",
+            model="put",
+            model_id=user.username,
+            details=f"Create period {period_in.Name}",
+            timestamp=now.replace(tzinfo=None)
+        ))
+        return period
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating period: {str(e)}") 
+
+@router.delete("/{period_id}")
+async def delete_period(period_id: str, db: AsyncSession = Depends(get_db), user: UserOut = Depends(get_current_admin)):
+    try:
+        if not user.is_admin:
+            raise HTTPException(status_code=403, detail="Permission denied")
+        stmt = select(Period).options(selectinload(Period.reports)).where(Period.ID == period_id)
+        result = await db.execute(stmt)
+        period = result.scalar_one_or_none()
+        if not period:
+            raise HTTPException(status_code=404, detail="Period not found")
+
+        if period.reports:
+            raise HTTPException(status_code=400, detail="Cannot delete period with attached reports")
+
+        await db.delete(period)
+        await db.commit()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting period: {str(e)}")
+
+
+===== FILE: backend/app\routers\admin_report.py =====
+# backend/app/routers/report.py
+
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from ..crud import report as crud_report
+from ..crud import audit_log as crud_audit_log
+from ..models.period import Period
+from ..models.report_type import ReportType
+from ..models.report import Report
+from ..schemas.report import ReportCreate, ReportOut, ReportStatus
+from ..schemas.audit_log import AuditLogCreate
+from ..dependencies.auth import get_current_admin
+from ..database import get_db
+import os
+import hashlib
+from datetime import datetime, timezone
+from ..models.user import User
+
+from fastapi.responses import FileResponse
+import zipfile
+import tempfile
+import uuid
+
+router = APIRouter(prefix="/admin/report", tags=["Report"])
+
+@router.get("/{period_id}", response_model=list[ReportOut])
+async def get_reports_by_period(
+    period_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin=Depends(get_current_admin)
+):
+    try:
+        from ..crud import report as crud_report
+        reports = await crud_report.get_latest_reports_by_period(db, period_id)
+        return reports
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch reports: {str(e)}")
+   
+@router.get("/download/{period_id}")
+async def download_period_folder(
+    period_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin=Depends(get_current_admin)  # ✅ Chỉ cho admin
+    ):
+    #try:
+    result = await db.execute(select(Period).where(Period.ID == period_id))
+    period = result.scalar_one_or_none()
+    if not period:
+        raise HTTPException(status_code=404, detail="Period not found")
+
+    folder_path = period.FolderPath
+    if not os.path.isdir(folder_path):
+        raise HTTPException(status_code=404, detail="Folder not found")
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for root, _, files in os.walk(folder_path):
+            for file in files:
+                full_path = os.path.join(root, file)
+                relative_path = os.path.relpath(full_path, folder_path)
+                zipf.write(full_path, arcname=relative_path)
+
+    zip_filename = f"{period_id}.zip"
+    return FileResponse(tmp.name, filename=zip_filename, media_type="application/zip")
+    #except Exception as e:
+    #    raise HTTPException(status_code=500, detail=f"Failed to download folder: {str(e)}")
+
+@router.get("/download/{period_id}/sender/{sender}")
+async def download_report_by_sender(
+    period_id: str,
+    sender: str,
+    db: AsyncSession = Depends(get_db),
+    admin=Depends(get_current_admin)
+):
+    try:
+        report = await crud_report.get_report_by_sender_and_period(db, sender, period_id)
+        if not report:
+            raise HTTPException(status_code=404, detail="Không tìm thấy báo cáo phù hợp.")
+
+        if not os.path.exists(report.FilePath):
+            raise HTTPException(status_code=404, detail="File báo cáo không còn tồn tại.")
+
+        return FileResponse(
+            path=report.FilePath,
+            filename=report.FileName,  # Tên file server để frontend tải đúng tên
+            media_type="application/octet-stream"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi khi tải báo cáo: {str(e)}")
+
+@router.get("/missing/{period_id}")
+async def get_missing_senders_in_period(
+    period_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin=Depends(get_current_admin)
+):
+    try:
+        # Lấy danh sách user không phải admin
+        user_result = await db.execute(
+            select(User).where(User.is_admin == False, User.is_locked == False)
+        )
+        users = user_result.scalars().all()
+        user_dict = {u.id: u for u in users}
+
+        # Lấy danh sách ID đã gửi báo cáo kỳ này
+        report_result = await db.execute(
+            select(Report.SendID).where(Report.PeriodID == period_id)
+        )
+        sent_ids = set(row[0] for row in report_result.all())
+
+        # Lọc ra user chưa gửi
+        missing_users = [
+            {
+                "id": u.id,
+                "username": u.username,
+                "name": u.name
+            }
+            for uid, u in user_dict.items()
+            if uid not in sent_ids
+        ]
+        return missing_users
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi khi lấy danh sách thiếu báo cáo: {str(e)}")
+
+
+
+
+
+
+===== FILE: backend/app\routers\admin_reporttype.py =====
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..schemas import report_type as schema
 from ..crud import report_type as crud
 from ..dependencies.auth import get_current_admin
 from ..database import get_db
+from ..schemas.audit_log import AuditLogCreate
+from ..crud import audit_log as crud_audit_log
+from datetime import datetime, timezone
 
-router = APIRouter(prefix="/admin/loaibaocao", tags=["Admin-LoaiBaoCao"])
+router = APIRouter(prefix="/admin/reporttype", tags=["Admin-reporttype"])
 
-@router.post("/", response_model=schema.ReportTypeOut)
+@router.post("", response_model=schema.ReportTypeOut)
 async def create(report_type_in: schema.ReportTypeCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_admin)):
     try:
+        now = datetime.now(timezone.utc)
+        await crud_audit_log.create_audit_log(db, AuditLogCreate(
+            user_id=user.id,
+            action=f"/admin/reporttype",
+            model="post",
+            model_id=user.username,
+            details=f"Create {report_type_in.Name}",
+            timestamp=now.replace(tzinfo=None)
+        ))
         return await crud.create_report_type(db, report_type_in)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error creating report type: {str(e)}")
 
-@router.get("/", response_model=list[schema.ReportTypeOut])
+@router.get("", response_model=list[schema.ReportTypeOut])
 async def read_all(db: AsyncSession = Depends(get_db), user=Depends(get_current_admin)):
     try:
         return await crud.get_report_types(db)
@@ -1647,6 +1922,16 @@ async def update(id: str, report_type_in: schema.ReportTypeUpdate, db: AsyncSess
             raise HTTPException(status_code=404, detail="ReportType not found")
         await crud.update_report_type(db, id, report_type_in)
         updated = await crud.get_report_type(db, id)
+
+        now = datetime.now(timezone.utc)
+        await crud_audit_log.create_audit_log(db, AuditLogCreate(
+            user_id=user.id,
+            action=f"/admin/reporttype/{id}",
+            model="put",
+            model_id=user.username,
+            details=f"Update {report_type_in.Name}",
+            timestamp=now.replace(tzinfo=None)
+        ))
         return updated
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error updating report type: {str(e)}")
@@ -1658,6 +1943,15 @@ async def delete(id: str, db: AsyncSession = Depends(get_db), user=Depends(get_c
         if not old:
             raise HTTPException(status_code=404, detail="ReportType not found")
         await crud.delete_report_type(db, id)
+        now = datetime.now(timezone.utc)
+        await crud_audit_log.create_audit_log(db, AuditLogCreate(
+            user_id=user.id,
+            action=f"/admin/reporttype/{id}",
+            model="put",
+            model_id=user.username,
+            details=f"Delete report type {id}",
+            timestamp=now.replace(tzinfo=None)
+        ))
         return {"msg": "Deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error deleting report type: {str(e)}")
@@ -1672,31 +1966,37 @@ from ..dependencies.auth import get_current_admin
 from ..database import get_db
 from fastapi.security import OAuth2PasswordRequestForm
 from ..services.auth import authenticate_admin_user, create_access_token
+from fastapi.responses import JSONResponse
+
+from ..schemas.audit_log import AuditLogCreate
+from ..crud import audit_log as crud_audit_log
+from datetime import datetime, timezone
 
 router = APIRouter(
     prefix="/admin/user",
     tags=["AdminUser"]
 )
 
-@router.post("/login")
-async def login_admin(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
-    try:
-        user = await authenticate_admin_user(db, form_data.username, form_data.password)
-        if not user:
-            raise HTTPException(status_code=401, detail="Incorrect username or password")
-        access_token = create_access_token({"sub": str(user.id), "role": "admin"})
-        return {"access_token": access_token, "token_type": "bearer"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error during login: {str(e)}")
-
-@router.post("/", response_model=UserOut)
+@router.post("", response_model=UserOut)
 async def create_user(user_in: UserCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_admin)):
     try:
+        try:
+            now = datetime.now(timezone.utc)
+            await crud_audit_log.create_audit_log(db, AuditLogCreate(
+                user_id=user.id,
+                action="/admin/user",
+                model="post",
+                model_id=user.username,
+                details=f"Create {user_in.username}",
+                timestamp=now.replace(tzinfo=None)
+            ))
+        except Exception as e:
+            print(f"⚠️ Audit log failed: {e}")
         return await crud_user.create_user(db, user_in)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error creating user: {str(e)}")
 
-@router.get("/", response_model=list[UserOut])
+@router.get("", response_model=list[UserOut])
 async def read_users(db: AsyncSession = Depends(get_db), user=Depends(get_current_admin)):
     try:
         return await crud_user.get_users(db)
@@ -1709,18 +2009,52 @@ async def update_user(user_id: int, user_in: UserUpdate, db: AsyncSession = Depe
         db_user = await crud_user.get_user(db, user_id)
         if not db_user:
             raise HTTPException(status_code=404, detail="User not found")
+
         await crud_user.update_user(db, user_id, user_in)
+
+        try:
+            now = datetime.now(timezone.utc)
+
+            # Xác định hành động nếu có thay đổi khóa
+            action_detail = f"Update user"
+            if user_in.is_locked is not None:
+                action_detail += f" (is_locked = {user_in.is_locked})"
+
+            await crud_audit_log.create_audit_log(db, AuditLogCreate(
+                user_id=user.id,
+                action=f"/admin/user/{user_id}",
+                model="put",
+                model_id=user.username,
+                details=action_detail,
+                timestamp=now.replace(tzinfo=None)
+            ))
+        except Exception as e:
+            print(f"⚠️ Audit log failed: {e}")
+
         return {"msg": "Updated successfully"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error updating user: {str(e)}")
 
+
 @router.delete("/{user_id}", dependencies=[Depends(get_current_admin)])
-async def delete_user(user_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_user(user_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_admin)):
     try:
         db_user = await crud_user.get_user(db, user_id)
         if not db_user:
             raise HTTPException(status_code=404, detail="User not found")
         await crud_user.delete_user(db, user_id)
+        try:
+            now = datetime.now(timezone.utc)
+            await crud_audit_log.create_audit_log(db, AuditLogCreate(
+                user_id=user.id,
+                action=f"/admin/user/{user_id}",
+                model="delete",
+                model_id=user.username,
+                details=f"Delete {user_id}",
+                timestamp=now.replace(tzinfo=None)
+            ))
+        except Exception as e:
+            print(f"⚠️ Audit log failed: {e}")
         return {"msg": "Deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error deleting user: {str(e)}")
@@ -1731,24 +2065,87 @@ from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import get_db
-from ..services import auth as auth_service
+from ..services.auth import authenticate_admin_user, create_access_token, authenticate_user
 from ..schemas.user import Token
 from ..schemas.user import UserCreate, UserUpdate, UserOut, PasswordChange
 from ..dependencies.auth import get_current_user
 from ..services.auth import verify_password
+from ..crud.user import get_user, update_password_only
+from fastapi.responses import JSONResponse
+from ..schemas.audit_log import AuditLogCreate
+from ..crud import audit_log as crud_audit_log
+from datetime import datetime, timezone
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
+@router.post("/admin")
+async def login_admin(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+    user = await authenticate_admin_user(db, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+    if user.is_locked:
+        raise HTTPException(status_code=403, detail="Tài khoản quản trị đã bị khóa.")
+    access_token = create_access_token({"sub": str(user.id), "isAdmin": "true"})
+    response = JSONResponse(content={"message": "Login success"})
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=True,
+        samesite="Strict",  # hoặc "Lax"
+        max_age=3600,
+        path="/")
+    try:
+        now = datetime.now(timezone.utc)
+        await crud_audit_log.create_audit_log(db, AuditLogCreate(
+            user_id=user.id,
+            action="/auth/admin",
+            model="post",
+            model_id=user.username,
+            details=f"Logined {user.username}",
+            timestamp=now.replace(tzinfo=None)
+        ))
+    except Exception as e:
+        print(f"⚠️ Audit log failed: {e}")
+    return response
+
 @router.post("/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+    user = await authenticate_user(db, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+    if user.is_locked:
+        raise HTTPException(status_code=403, detail="Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.")
+    access_token = create_access_token({"sub": str(user.id), "isAdmin": "false"})
+    response = JSONResponse(content={"message": "Login success"})
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=True,
+        samesite="Strict",  # hoặc "Lax"
+        max_age=3600,
+        path="/"
+    )
     try:
-        user = await auth_service.authenticate_user(db, form_data.username, form_data.password)
-        if not user:
-            raise HTTPException(status_code=401, detail="Incorrect username or password")
-        token = auth_service.create_access_token({"sub": str(user.id)})
-        return {"access_token": token, "token_type": "bearer"}
+        now = datetime.now(timezone.utc)
+        await crud_audit_log.create_audit_log(db, AuditLogCreate(
+            user_id=user.id,
+            action="/auth/login",
+            model="post",
+            model_id=user.username,
+            details=f"Logined {user.username}",
+            timestamp=now.replace(tzinfo=None)
+        ))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error during login: {str(e)}")
+        print(f"⚠️ Audit log failed: {e}")
+    return response
+
+@router.post("/logout")
+async def logout(user: UserOut = Depends(get_current_user)):
+    response = JSONResponse(content={"message": "Logged out"})
+    response.delete_cookie("access_token")
+    return response
 
 @router.get("/me", response_model=UserOut)
 async def get_current_user_info(user: UserOut = Depends(get_current_user)):
@@ -1759,22 +2156,29 @@ async def change_password(
     payload: PasswordChange,
     db: AsyncSession = Depends(get_db),
     user: UserOut = Depends(get_current_user)):
+    db_user = await get_user(db, user.id)
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # ✅ Kiểm tra mật khẩu cũ có đúng không
+    hashed_password = db_user.hashed_password
+    if not verify_password(payload.old_password, hashed_password):
+        raise HTTPException(status_code=401, detail="Mật khẩu cũ không đúng")
+
+    await update_password_only(db, user.id, payload.new_password)
     try:
-        from ..crud.user import get_user, update_password_only
-
-        db_user = await get_user(db, user.id)
-        if not db_user:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        # ✅ Kiểm tra mật khẩu cũ có đúng không
-        hashed_password = db_user.hashed_password
-        if not verify_password(payload.old_password, hashed_password):
-            raise HTTPException(status_code=401, detail="Mật khẩu cũ không đúng")
-
-        await update_password_only(db, user.id, payload.new_password)
-        return {"message": "Đổi mật khẩu thành công"}
+        now = datetime.now(timezone.utc)
+        await crud_audit_log.create_audit_log(db, AuditLogCreate(
+            user_id=user.id,
+            action="/auth/changepassword",
+            model="post",
+            model_id=user.username,
+            details=f"Logined {user.username}",
+            timestamp=now.replace(tzinfo=None)
+        ))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error during password change: {str(e)}")
+        print(f"⚠️ Audit log failed: {e}")
+    return {"message": "Đổi mật khẩu thành công"}
 
 
 ===== FILE: backend/app\routers\period.py =====
@@ -1793,38 +2197,6 @@ from ..dependencies.auth import get_current_user
 from ..schemas.user import UserOut
 
 router = APIRouter(prefix="/period", tags=["Period"])
-
-@router.post("/", response_model=PeriodOut)
-async def create_period(period_in: PeriodCreate, db: AsyncSession = Depends(get_db),
-                        user: UserOut = Depends(get_current_user)):
-    try:
-        if not user.is_admin:
-            raise HTTPException(status_code=403, detail="Permission denied")
-        exists = await db.execute(select(Period).where(Period.ID == period_in.ID))
-        if exists.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail="Period ID already exists")
-
-        period = Period(**period_in.model_dump())
-        db.add(period)
-        try:
-            await db.commit()
-            await db.refresh(period)
-        except IntegrityError:
-            await db.rollback()
-            raise HTTPException(status_code=400, detail="Invalid period creation")
-        return period
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error creating period: {str(e)}")
-
-@router.get("/", response_model=list[PeriodOut])
-async def get_periods(db: AsyncSession = Depends(get_db), user: UserOut = Depends(get_current_user)):
-    try:
-        if not user.is_admin:
-            raise HTTPException(status_code=403, detail="Permission denied")
-        result = await db.execute(select(Period))
-        return result.scalars().all()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching periods: {str(e)}")
 
 @router.get("/active", response_model=list[PeriodOut])
 async def get_active_periods_by_user_level(
@@ -1853,62 +2225,6 @@ async def get_active_periods_by_user_level(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching active periods: {str(e)}")
 
-@router.get("/{period_id}", response_model=PeriodOut)
-async def get_period(period_id: str, db: AsyncSession = Depends(get_db), user: UserOut = Depends(get_current_user)):
-    try:
-        if not user.is_admin:
-            raise HTTPException(status_code=403, detail="Permission denied")
-        result = await db.execute(select(Period).where(Period.ID == period_id))
-        period = result.scalar_one_or_none()
-        if not period:
-            raise HTTPException(status_code=404, detail="Period not found")
-        return period
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching period: {str(e)}")
-
-@router.put("/{period_id}", response_model=PeriodOut)
-async def update_period(period_id: str, period_in: PeriodUpdate, db: AsyncSession = Depends(get_db), user: UserOut = Depends(get_current_user)):
-    try:
-        if not user.is_admin:
-            raise HTTPException(status_code=403, detail="Permission denied")
-        result = await db.execute(select(Period).where(Period.ID == period_id))
-        period = result.scalar_one_or_none()
-        if not period:
-            raise HTTPException(status_code=404, detail="Period not found")
-
-        update_data = period_in.model_dump(exclude_unset=True)
-        for key, value in update_data.items():
-            setattr(period, key, value)
-        try:
-            await db.commit()
-            await db.refresh(period)
-        except IntegrityError:
-            await db.rollback()
-            raise HTTPException(status_code=400, detail="Invalid data update")
-
-        return period
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error updating period: {str(e)}") 
-
-@router.delete("/{period_id}")
-async def delete_period(period_id: str, db: AsyncSession = Depends(get_db), user: UserOut = Depends(get_current_user)):
-    try:
-        if not user.is_admin:
-            raise HTTPException(status_code=403, detail="Permission denied")
-        stmt = select(Period).options(selectinload(Period.reports)).where(Period.ID == period_id)
-        result = await db.execute(stmt)
-        period = result.scalar_one_or_none()
-        if not period:
-            raise HTTPException(status_code=404, detail="Period not found")
-
-        if period.reports:
-            raise HTTPException(status_code=400, detail="Cannot delete period with attached reports")
-
-        await db.delete(period)
-        await db.commit()
-        return {"ok": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error deleting period: {str(e)}")
 
 
 ===== FILE: backend/app\routers\report.py =====
@@ -1925,7 +2241,6 @@ from ..models.report import Report
 from ..schemas.report import ReportCreate, ReportOut, ReportStatus
 from ..schemas.audit_log import AuditLogCreate
 from ..dependencies.auth import get_current_user
-from ..dependencies.auth import get_current_admin
 from ..database import get_db
 import os
 import hashlib
@@ -1934,6 +2249,7 @@ from datetime import datetime, timezone
 from fastapi.responses import FileResponse
 import zipfile
 import tempfile
+import uuid
 
 router = APIRouter(prefix="/report", tags=["Report"])
 
@@ -2016,7 +2332,6 @@ async def upload_report(
             late_seconds = 0
 
         # Sinh ID tránh trùng
-        import uuid
         report_id = f"{user.username}_{period_id}_{uuid.uuid4().hex[:8]}"
 
         old_reports = await crud_report.get_all_reports_by_sender_and_period(db, user.username, period_id)
@@ -2067,7 +2382,6 @@ async def upload_report(
         raise HTTPException(status_code=500, detail="Failed to upload report")
     return report
 
-
 @router.get("/reports", response_model=list[ReportOut])
 async def get_my_reports(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     try:
@@ -2105,52 +2419,47 @@ async def get_user_report_for_period(
         ID=report.ID
     )
 
-
-@router.get("/admin/{period_id}", response_model=list[ReportOut])
-async def get_reports_by_period(
+@router.get("/download/me/{period_id}")
+async def download_my_report(
     period_id: str,
     db: AsyncSession = Depends(get_db),
-    admin=Depends(get_current_admin)
+    user=Depends(get_current_user)
 ):
     try:
-        from ..crud import report as crud_report
-        reports = await crud_report.get_latest_reports_by_period(db, period_id)
-        return reports
+        # Tìm báo cáo mới nhất của người dùng trong kỳ
+        report = await crud_report.get_report_by_sender_and_period(db, user.username, period_id)
+        if not report:
+            raise HTTPException(status_code=404, detail="Bạn chưa gửi báo cáo trong kỳ này.")
+
+        if not os.path.exists(report.FilePath):
+            raise HTTPException(status_code=404, detail="File báo cáo không còn tồn tại trên hệ thống.")
+        print(report.FilePath)
+        return FileResponse(
+            path=report.FilePath,
+            filename=report.OriFileName,
+            media_type="application/octet-stream"
+        )
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch reports: {str(e)}")
-   
-
-@router.get("/download/{period_id}")
-async def download_period_folder(
-    period_id: str,
-    db: AsyncSession = Depends(get_db),
-    admin=Depends(get_current_admin)  # ✅ Chỉ cho admin
-    ):
-    try:
-        result = await db.execute(select(Period).where(Period.ID == period_id))
-        period = result.scalar_one_or_none()
-        if not period:
-            raise HTTPException(status_code=404, detail="Period not found")
-
-        folder_path = period.FolderPath
-        if not os.path.isdir(folder_path):
-            raise HTTPException(status_code=404, detail="Folder not found")
-
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
-        with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED) as zipf:
-            for root, _, files in os.walk(folder_path):
-                for file in files:
-                    full_path = os.path.join(root, file)
-                    relative_path = os.path.relpath(full_path, folder_path)
-                    zipf.write(full_path, arcname=relative_path)
-
-        zip_filename = f"{period_id}.zip"
-        return FileResponse(tmp.name, filename=zip_filename, media_type="application/zip")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to download folder: {str(e)}")
+        print(f"❌ Lỗi khi tải file cá nhân: {e}")
+        raise HTTPException(status_code=500, detail="Không thể tải file báo cáo.")
 
 
 
+
+
+===== FILE: backend/app\routers\utils.py =====
+from fastapi import APIRouter, Depends
+from fastapi.security import OAuth2PasswordBearer
+from ..dependencies.auth import get_current_user
+from datetime import datetime, timezone
+
+router = APIRouter()
+
+@router.get("/server-time")
+async def get_server_time(current_user=Depends(get_current_user)):
+    return {"now": datetime.now(timezone.utc).isoformat()}
 
 
 ===== FILE: backend/app\schemas\audit_log.py =====
@@ -2611,6 +2920,7 @@ class UserBase(BaseModel):
     name: Optional[str] = None
     level: Optional[str] = None
     is_admin: bool = False
+    is_locked: Optional[bool] = False  # ✅ Thêm vào base để kế thừa
 
 class UserCreate(UserBase):
     password: str
@@ -2620,6 +2930,7 @@ class UserUpdate(BaseModel):
     level: Optional[str] = None
     password: Optional[str] = None
     is_admin: Optional[bool] = None
+    is_locked: Optional[bool] = None  # ✅ Cho phép cập nhật
 
 class UserOut(BaseModel):
     id: int
@@ -2627,6 +2938,7 @@ class UserOut(BaseModel):
     name: Optional[str] = None
     level: Optional[str] = None
     is_admin: bool
+    is_locked: Optional[bool] = False  # ✅ Trả ra trong response
     time_created: Optional[datetime] = None  # ✅ Bổ sung
     avatar: Optional[str] = None              # ✅ Bổ sung
 
@@ -2677,7 +2989,7 @@ def get_password_hash(password):
 def create_access_token(data: dict, expires_delta: timedelta = None):
     try:
         to_encode = data.copy()
-        expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
+        expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=60))
         to_encode.update({"exp": expire})
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
         return encoded_jwt
@@ -3357,10 +3669,6 @@ async def test_crud_user():
         assert not any(u["id"] == user_id for u in users)
 
 
-===== FILE: frontend/.env =====
-VITE_API_BASE_URL=https://100.90.252.36:8000
-
-
 ===== FILE: frontend/Dockerfile =====
 # --- Stage 1: build React app ---
 FROM node:20-alpine as builder
@@ -3387,39 +3695,61 @@ CMD ["nginx", "-g", "daemon off;"]
 ===== FILE: frontend/env-config.js =====
 
 window.__ENV__ = {
-  VITE_API_BASE_URL: "http://localhost:8000"
+  VITE_API_BASE_URL: "/api"
 };
 
 
 ===== FILE: frontend/index.html =====
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Hệ thống gửi báo cáo Công an tỉnh Quảng Bình</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script src="/env-config.js"></script>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hệ thống gửi báo cáo Công an tỉnh Quảng Trị</title>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script src="/env-config.js"></script>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+
 </html>
 
-
 ===== FILE: frontend/nginx.conf =====
+# Chuyển hướng toàn bộ HTTP sang HTTPS
+server {
+    listen 80;
+    server_name  localhost;
+
+    return 301 https://$host$request_uri;
+}
+
 server {
     listen 443 ssl;
     server_name localhost;
 
+    client_max_body_size 1024M;
+
     ssl_certificate     /etc/nginx/ssl/server.crt;
     ssl_certificate_key /etc/nginx/ssl/server.key;
-
     ssl_protocols TLSv1.2 TLSv1.3;
 
     gzip on;
     gzip_types text/plain text/css application/json application/javascript application/x-javascript text/xml application/xml application/xml+rss text/javascript;
 
+    location /api/ {
+        proxy_pass https://backend:8000/;
+        proxy_ssl_verify off;
+		proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    # Frontend static files
     location / {
         root /usr/share/nginx/html;
         index index.html index.htm;
@@ -7324,24 +7654,20 @@ import axios from "../services/api";
 import iconUser from "/icon_user.png";
 import iconInfo from "/icon_info.png";
 
-const AccountInfo = ({ token }) => {
+const AccountInfo = () => {
   const [user, setUser] = useState(null);
 
   useEffect(() => {
     const fetchMe = async () => {
       try {
-        const res = await axios.get("/auth/me", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        const res = await axios.get("/auth/me");
         setUser(res.data);
       } catch (err) {
         console.error("❌ Lỗi khi lấy thông tin tài khoản:", err);
       }
     };
-    if (token) fetchMe();
-  }, [token]);
+    fetchMe();
+  }, []);
 
   if (!user) return <div className="p-4 text-gray-600">Đang tải thông tin...</div>;
 
@@ -7413,10 +7739,8 @@ const AccountManager = () => {
 
   const fetchUsers = async () => {
     try {
-      const token = localStorage.getItem("admin_token");
-      const res = await axios.get("/admin/user", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      //const token = localStorage.getItem("admin_token");
+      const res = await axios.get("/admin/user");
       setUsers(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.error("Failed to fetch users", err);
@@ -7431,77 +7755,63 @@ const AccountManager = () => {
 
 
   const handleRename = async (user, newName) => {
-  const token = localStorage.getItem("admin_token");
-  try {
-    await axios.put(`/admin/user/${user.id}`, {
-      name: newName,
-      level: user.level,
-      password: user.password || "placeholder",  // hoặc để backend bỏ qua password
-      is_admin: user.is_admin,
-    }, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    fetchUsers();
-    alert("✅ Đổi tên thành công");
-  } catch (err) {
-    alert("❌ Lỗi khi đổi tên: " + err.response?.data?.detail || err.message);
-  }
-};
+    try {
+      await axios.put(`/admin/user/${user.id}`, {
+        name: newName,
+        level: user.level,
+        password: user.password || "placeholder",  // hoặc để backend bỏ qua password
+        is_admin: user.is_admin,
+      });
+      fetchUsers();
+      alert("✅ Đổi tên thành công");
+    } catch (err) {
+      alert("❌ Lỗi khi đổi tên: " + err.response?.data?.detail || err.message);
+    }
+  };
 
   const handleResetPassword = async (user, newPassword) => {
-  const token = localStorage.getItem("admin_token");
-  try {
-    await axios.put(`/admin/user/${user.id}`, {
-      name: user.name,
-      level: user.level,
-      password: newPassword,
-      is_admin: user.is_admin,
-    }, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    alert("✅ Đổi mật khẩu thành công");
-  } catch (err) {
-    alert("❌ Lỗi khi đổi mật khẩu: " + (err.response?.data?.detail || err.message));
-  }
-};
+    try {
+      await axios.put(`/admin/user/${user.id}`, {
+        name: user.name,
+        level: user.level,
+        password: newPassword,
+        is_admin: user.is_admin,
+      });
+      alert("✅ Đổi mật khẩu thành công");
+    } catch (err) {
+      alert("❌ Lỗi khi đổi mật khẩu: " + (err.response?.data?.detail || err.message));
+    }
+  };
   const handleDeleteUser = async (user) => {
-  const token = localStorage.getItem("admin_token");
-  try {
-    await axios.delete(`/admin/user/${user.id}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    fetchUsers();
-    alert("✅ Đã xoá tài khoản");
-  } catch (err) {
-    alert("❌ Lỗi khi xoá: " + (err.response?.data?.detail || err.message));
-  }
-};
+    try {
+      await axios.delete(`/admin/user/${user.id}`);
+      fetchUsers();
+      alert("✅ Đã xoá tài khoản");
+    } catch (err) {
+      alert("❌ Lỗi khi xoá: " + (err.response?.data?.detail || err.message));
+    }
+  };
   const createUser = async (e) => {
-  e.preventDefault();
-  try {
-    const token = localStorage.getItem("admin_token");
-    const res = await axios.post("/admin/user", form, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    alert("✅ Tạo tài khoản thành công");
-    fetchUsers();
-    setForm({
-      username: "",
-      name: "",
-      level: "CAPPHONG",
-      is_admin: false,
-      password: "",
-    });
-  } catch (err) {
-    alert("❌ Lỗi tạo tài khoản: " + (err.response?.data?.detail || err.message));
-  }
-};
+    e.preventDefault();
+    try {
+      const res = await axios.post("/admin/user", form);
+      alert("✅ Tạo tài khoản thành công");
+      fetchUsers();
+      setForm({
+        username: "",
+        name: "",
+        level: "CAPPHONG",
+        is_admin: false,
+        password: "",
+      });
+    } catch (err) {
+      alert("❌ Lỗi tạo tài khoản: " + (err.response?.data?.detail || err.message));
+    }
+  };
 
 
   const handleAction = async (action, user) => {
     setMenuOpen(null);
-    const token = localStorage.getItem("admin_token");
-
     if (action === "rename") {
       setSelectedUser(user);
       setShowRenameModal(true);
@@ -7619,26 +7929,26 @@ const AccountManager = () => {
         </div>
       </div>
       {showRenameModal && selectedUser && (
-      <RenameModal
-        user={selectedUser}
-        onClose={() => setShowRenameModal(false)}
-        onRename={handleRename}
-      />
-    )}
-    {showResetModal && selectedUser && (
-  <ResetPasswordModal
-    user={selectedUser}
-    onClose={() => setShowResetModal(false)}
-    onReset={handleResetPassword}
-  />
-)}
-{showDeleteModal && selectedUser && (
-  <DeleteUserModal
-    user={selectedUser}
-    onClose={() => setShowDeleteModal(false)}
-    onDelete={handleDeleteUser}
-  />
-)}
+        <RenameModal
+          user={selectedUser}
+          onClose={() => setShowRenameModal(false)}
+          onRename={handleRename}
+        />
+      )}
+      {showResetModal && selectedUser && (
+        <ResetPasswordModal
+          user={selectedUser}
+          onClose={() => setShowResetModal(false)}
+          onReset={handleResetPassword}
+        />
+      )}
+      {showDeleteModal && selectedUser && (
+        <DeleteUserModal
+          user={selectedUser}
+          onClose={() => setShowDeleteModal(false)}
+          onDelete={handleDeleteUser}
+        />
+      )}
     </div>
   );
 };
@@ -7646,7 +7956,7 @@ const AccountManager = () => {
 export default AccountManager;
 
 ===== FILE: frontend/src\pages\AdminDashboard.jsx =====
-import React, { useState, createContext } from "react";
+import React, { useEffect, useState, createContext } from "react";
 export const DashboardContext = createContext();
 import logo from "/logo.png";
 import iconBell from "/icon_bell.png";
@@ -7656,18 +7966,36 @@ import DropdownMenu from "../components/DropdownMenu";
 import ReportSummary from "./ReportSummary";
 import AccountManager from "./AccountManager";
 import PeriodManager from "./PeriodManager";
-//import ReportTypeManager from "./ReportTypeManager";
-//import AuditLog from "./AuditLog";
+import ReportTypeManager from "./ReportTypeManager";
+import AuditLog from "./AuditLog";
 import ChangePassword from "./ChangePassword";
 import AccountInfo from "./AccountInfo";
-import { getTokenInfo } from "../utils/auth";
+import axios from "../services/api"; // bổ sung nếu thiếu
 
 const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState("summary");
-  const user = getTokenInfo();
-  const navigate = useNavigate();
   const [selectedPeriodId, setSelectedPeriodId] = useState(null);
-
+  const [user, setUser] = useState(null);
+  const navigate = useNavigate();
+  const handleLogout = async () => {
+    try {
+      await axios.post("/auth/logout", {}, { withCredentials: true });
+    } catch (err) {
+      console.error("Logout error:", err);
+    } finally {
+      // Chuyển hướng sang trang login sau khi xoá cookie
+      setUser("");
+      navigate("/login/admin");  // hoặc "/login/admin" tuỳ loại tài khoản
+    }
+  };
+  useEffect(() => {
+    axios.get("/auth/me", { withCredentials: true })
+      .then(res => setUser(res.data))
+      .catch(() => {
+        alert("Phiên đăng nhập đã hết hạn");
+        navigate("/login/admin");
+      });
+  }, []);
   const renderContent = () => {
     switch (activeTab) {
       case "summary":
@@ -7676,14 +8004,14 @@ const AdminDashboard = () => {
         return <AccountManager />;
       case "period":
         return <PeriodManager />;
-      //case "reportType":
-        //return <ReportTypeManager />;
-      //case "audit":
-        //return <AuditLog />;
+      case "reportType":
+        return <ReportTypeManager />;
+      case "audit":
+        return <AuditLog />;
       case "changepw":
         return <ChangePassword />;
       case "accountInfo":
-        return <AccountInfo token={localStorage.getItem("admin_token")} />;
+        return <AccountInfo />;
       default:
         return null;
     }
@@ -7691,46 +8019,43 @@ const AdminDashboard = () => {
 
   return (
     <DashboardContext.Provider value={{ activeTab, setActiveTab, selectedPeriodId, setSelectedPeriodId }}>
-    <div className="bg-[#eef4fb] min-h-screen flex flex-col">
-      {/* Header */}
-      <div className="flex justify-between items-center px-6 py-3 bg-[#eaf7f5] shadow">
-        <div className="flex items-center space-x-3">
-          <img src={logo} alt="logo" className="w-8 h-8" />
-          <h1 className="text-[#0d2d52] font-bold text-lg">
-            Hệ thống báo cáo Công an tỉnh Quảng Bình
-          </h1>
-        </div>
-        <div className="flex items-center space-x-4">
-          <img src={iconBell} alt="bell" className="w-5 h-5" />
-          <div className="text-right text-sm text-[#0d2d52]">
-            <div className="font-semibold">{user?.name || "Quản trị viên"}</div>
-            <div className="text-xs">{user?.username}</div>
+      <div className="bg-[#eef4fb] min-h-screen flex flex-col">
+        {/* Header */}
+        <div className="flex justify-between items-center px-6 py-3 bg-[#eaf7f5] shadow">
+          <div className="flex items-center space-x-3">
+            <img src={logo} alt="logo" className="w-8 h-8" />
+            <h1 className="text-[#0d2d52] font-bold text-lg">
+              Hệ thống báo cáo Công an tỉnh Quảng Trị
+            </h1>
           </div>
-          <DropdownMenu
-            onLogout={() => {
-              localStorage.removeItem("admin_token");
-              navigate("/login/admin");
-            }}
-            onChangePassword={() => setActiveTab("changepw")}
-            onShowAccountInfo={() => setActiveTab("accountInfo")}
-          />
-        </div>
-      </div>
-
-      <div className="flex flex-1">
-        {/* Sidebar */}
-        <div className="w-[280px] bg-white p-4 border-r">
-          <SidebarItem label="Tổng hợp báo cáo" tab="summary" activeTab={activeTab} onClick={setActiveTab} />
-          <SidebarItem label="Quản lý tài khoản" tab="account" activeTab={activeTab} onClick={setActiveTab} />
-          <SidebarItem label="Quản lý Kỳ báo cáo" tab="period" activeTab={activeTab} onClick={setActiveTab} />
-          <SidebarItem label="Quản lý loại báo cáo" tab="reportType" activeTab={activeTab} onClick={setActiveTab} />
-          <SidebarItem label="Nhật ký thao tác" tab="audit" activeTab={activeTab} onClick={setActiveTab} />
+          <div className="flex items-center space-x-4">
+            <img src={iconBell} alt="bell" className="w-5 h-5" />
+            <div className="text-right text-sm text-[#0d2d52]">
+              <div className="font-semibold">{user?.name || "Quản trị viên"}</div>
+              <div className="text-xs">{user?.username}</div>
+            </div>
+            <DropdownMenu
+              onLogout={handleLogout}
+              onChangePassword={() => setActiveTab("changepw")}
+              onShowAccountInfo={() => setActiveTab("accountInfo")}
+            />
+          </div>
         </div>
 
-        {/* Main Content */}
-        <div className="flex-1 p-6">{renderContent()}</div>
+        <div className="flex flex-1">
+          {/* Sidebar */}
+          <div className="w-[280px] bg-white p-4 border-r">
+            <SidebarItem label="Tổng hợp báo cáo" tab="summary" activeTab={activeTab} onClick={setActiveTab} />
+            <SidebarItem label="Quản lý tài khoản" tab="account" activeTab={activeTab} onClick={setActiveTab} />
+            <SidebarItem label="Quản lý Kỳ báo cáo" tab="period" activeTab={activeTab} onClick={setActiveTab} />
+            <SidebarItem label="Quản lý loại báo cáo" tab="reportType" activeTab={activeTab} onClick={setActiveTab} />
+            <SidebarItem label="Nhật ký thao tác" tab="audit" activeTab={activeTab} onClick={setActiveTab} />
+          </div>
+
+          {/* Main Content */}
+          <div className="flex-1 p-6">{renderContent()}</div>
+        </div>
       </div>
-    </div>
     </DashboardContext.Provider>
   );
 };
@@ -7738,11 +8063,10 @@ const AdminDashboard = () => {
 const SidebarItem = ({ label, tab, activeTab, onClick }) => (
   <div
     onClick={() => onClick(tab)}
-    className={`p-3 rounded-lg mb-2 cursor-pointer font-medium text-sm ${
-      activeTab === tab
-        ? "bg-blue-100 border border-blue-400 text-blue-800"
-        : "bg-gray-100 hover:bg-gray-200 text-gray-700"
-    }`}
+    className={`p-3 rounded-lg mb-2 cursor-pointer font-medium text-sm ${activeTab === tab
+      ? "bg-blue-100 border border-blue-400 text-blue-800"
+      : "bg-gray-100 hover:bg-gray-200 text-gray-700"
+      }`}
   >
     {label}
   </div>
@@ -7751,8 +8075,100 @@ const SidebarItem = ({ label, tab, activeTab, onClick }) => (
 export default AdminDashboard;
 
 
+===== FILE: frontend/src\pages\AuditLog.jsx =====
+import React, { useEffect, useState } from "react";
+import axios from "../services/api";
+
+const AuditLog = () => {
+    const [logs, setLogs] = useState([]);
+    const [error, setError] = useState("");
+    const [currentPage, setCurrentPage] = useState(1);
+    const rowsPerPage = 20;
+
+    useEffect(() => {
+        const fetchLogs = async () => {
+            try {
+                const response = await axios.get("/admin/auditlogs");
+                const sorted = response.data.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                setLogs(sorted);
+            } catch (err) {
+                setError("Không thể tải nhật ký.");
+            }
+        };
+        fetchLogs();
+    }, []);
+
+    const totalPages = Math.ceil(logs.length / rowsPerPage);
+    const paginatedLogs = logs.slice(
+        (currentPage - 1) * rowsPerPage,
+        currentPage * rowsPerPage
+    );
+
+    return (
+        <div className="p-4 h-full overflow-hidden flex flex-col">
+            <h2 className="text-2xl font-bold mb-4 text-center">NHẬT KÝ TÁC ĐỘNG</h2>
+            {error && <div className="text-red-500">{error}</div>}
+            <div className="flex-1 overflow-auto border rounded bg-white">
+                <table className="table-auto w-full text-sm text-left border-collapse">
+                    <thead className="bg-gray-100 text-sm font-semibold">
+                        <tr>
+                            <th className="px-2 py-1">#</th>
+                            <th className="px-2 py-1">Thời gian</th>
+                            <th className="px-2 py-1">User</th>
+                            <th className="px-2 py-1">Hành động</th>
+                            <th className="px-2 py-1">Đối tượng</th>
+                            <th className="px-2 py-1">Chi tiết</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {paginatedLogs.map((log, index) => (
+                            <tr key={log.id} className="border-t hover:bg-gray-50">
+                                <td className="px-2 py-1 text-center">
+                                    {(currentPage - 1) * rowsPerPage + index + 1}
+                                </td>
+                                <td className="px-2 py-1">
+                                    {new Date(log.timestamp).toLocaleString("vi-VN")}
+                                </td>
+                                <td className="px-2 py-1 text-center">{log.user_id}</td>
+                                <td className="px-2 py-1 text-center">{log.action}</td>
+                                <td className="px-2 py-1 text-center">
+                                    {log.model} #{log.model_id}
+                                </td>
+                                <td className="px-2 py-1">{log.details}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+
+            <div className="mt-2 flex justify-center items-center gap-4">
+                <button
+                    className="px-3 py-1 border rounded hover:bg-gray-200"
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+                >
+                    ← Trước
+                </button>
+                <span>
+                    Trang {currentPage} / {totalPages}
+                </span>
+                <button
+                    className="px-3 py-1 border rounded hover:bg-gray-200"
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+                >
+                    Sau →
+                </button>
+            </div>
+        </div>
+    );
+};
+
+export default AuditLog;
+
+
 ===== FILE: frontend/src\pages\ChangePassword.jsx =====
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import axios from '../services/api'; // dùng cấu hình axios có sẵn
 //import api from "../utils/api";
 
@@ -7773,17 +8189,11 @@ const ChangePassword = () => {
     }
 
     try {
-      const token = localStorage.getItem('access_token');
       const response = await axios.post(
         '/auth/changepassword',
         {
           old_password: oldPassword,
           new_password: newPassword,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
         }
       );
 
@@ -7806,11 +8216,10 @@ const ChangePassword = () => {
 
       {message && (
         <div
-          className={`mb-4 px-4 py-2 rounded text-sm ${
-            messageType === 'success'
-              ? 'bg-green-100 text-green-700'
-              : 'bg-red-100 text-red-700'
-          }`}
+          className={`mb-4 px-4 py-2 rounded text-sm ${messageType === 'success'
+            ? 'bg-green-100 text-green-700'
+            : 'bg-red-100 text-red-700'
+            }`}
         >
           {message}
         </div>
@@ -7879,30 +8288,30 @@ export default ChangePassword;
 
 
 ===== FILE: frontend/src\pages\LoginAdmin.jsx =====
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import axios from "../services/api";
-//import api from "../utils/api";
 import { useNavigate } from "react-router-dom";
 
 const LoginAdmin = () => {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
+
   const navigate = useNavigate();
 
   const handleLogin = async () => {
     try {
-      const response = await axios.post("/admin/user/login", {
-        username,
-        password,
-      }, {
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-      });
-
-      const token = response.data.access_token;
-      localStorage.setItem("admin_token", token);
+      const response = await axios.post(
+        "/auth/admin",
+        new URLSearchParams({ username, password }),
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+        }
+      );
       if (remember) {
         localStorage.setItem("admin_username", username);
       }
@@ -7912,26 +8321,50 @@ const LoginAdmin = () => {
     }
   };
 
+  const handleKeyPress = (e) => {
+    if (e.key === "Enter") {
+      handleLogin();
+    }
+  };
+
   return (
     <div className="flex flex-col items-center justify-center h-screen bg-gray-100">
-      
       <div className="bg-white p-8 rounded shadow-md w-100">
-        <h1 className="text-2xl font-bold mb-4 text-center">Hệ thống gửi báo cáo Công an tỉnh Quảng Bình</h1>
+        <h1 className="text-2xl font-bold mb-4 text-center">
+          Hệ thống gửi báo cáo Công an tỉnh Quảng Trị
+        </h1>
         <h2 className="text-1xl font-bold mb-4 text-center">Đăng nhập Quản trị viên</h2>
         <input
           type="text"
           placeholder="Tên đăng nhập"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
+          onKeyDown={handleKeyPress}
           className="w-full p-2 mb-4 border border-gray-300 rounded"
         />
         <input
-          type="password"
+          type={showPassword ? "text" : "password"}
           placeholder="Mật khẩu"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="w-full p-2 mb-4 border border-gray-300 rounded"
+          onKeyDown={handleKeyPress}
+          className="w-full p-2 mb-2 border border-gray-300 rounded"
         />
+        <div className="flex items-center mb-2">
+          <input
+            type="checkbox"
+            checked={showPassword}
+            onChange={() => setShowPassword(!showPassword)}
+            className="mr-2"
+          />
+          <label>Hiện mật khẩu</label>
+        </div>
+        <button
+          onClick={handleLogin}
+          className="w-full bg-blue-500 text-white py-2 rounded hover:bg-blue-600"
+        >
+          Đăng nhập
+        </button>
         <div className="flex items-center mb-4">
           <input
             type="checkbox"
@@ -7941,12 +8374,6 @@ const LoginAdmin = () => {
           />
           <label>Ghi nhớ đăng nhập</label>
         </div>
-        <button
-          onClick={handleLogin}
-          className="w-full bg-blue-500 text-white py-2 rounded hover:bg-blue-600"
-        >
-          Đăng nhập
-        </button>
       </div>
     </div>
   );
@@ -7965,104 +8392,96 @@ const LoginBranch = () => {
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
   const [error, setError] = useState('');
-  const [autoTried, setAutoTried] = useState(false);  // ✅ chỉ cho phép auto login 1 lần
+  const [autoTried, setAutoTried] = useState(false);
   const navigate = useNavigate();
+  const [showPassword, setShowPassword] = useState(false);
 
-  // Auto login nếu có lưu remember
   useEffect(() => {
-  if (!autoTried) {
-    const saved = localStorage.getItem('remember_branch');
-    if (saved) {
-      try {
-        const { username, password } = JSON.parse(atob(saved));
-        setUsername(username);
-        setPassword(password);
-        setRemember(true);
-        autoLogin(username, password);
-      } catch (e) {
-        console.error("Lỗi giải mã remember_branch:", e);
-        localStorage.removeItem("remember_branch");
+    localStorage.removeItem("user");
+  }, []);
+
+  // ✅ Auto điền username nếu có nhớ đăng nhập (không tự động login)
+  useEffect(() => {
+    if (!autoTried) {
+      const saved = localStorage.getItem('remember_branch');
+      if (saved) {
+        try {
+          const { username } = JSON.parse(atob(saved));
+          setUsername(username);
+          setRemember(true);
+        } catch (e) {
+          console.error("Lỗi giải mã remember_branch:", e);
+          localStorage.removeItem("remember_branch");
+        }
       }
+      setAutoTried(true);
     }
-    setAutoTried(true);
-  }
-}, [autoTried]);
+  }, [autoTried]);
 
-
-  const autoLogin = async (username, password) => {
-  try {
-    const res = await axios.post('/auth/login', new URLSearchParams({ username, password }), {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    });
-
-    const token = res.data.access_token;
-    localStorage.setItem('access_token', token);
-
-    // ✅ Gọi /auth/me để lấy thông tin người dùng
-    const headers = { Authorization: `Bearer ${token}` };
-    const userRes = await axios.get('/auth/me', { headers });
-    const userInfo = userRes.data;
-
-    localStorage.setItem('user', JSON.stringify(userInfo));
-    navigate('/user/dashboard');
-  } catch (err) {
-    console.warn('Tự động đăng nhập thất bại');
-    localStorage.removeItem('remember_branch');
-  }
-};
-
+  // ✅ Nếu bỏ check ghi nhớ → xoá thông tin
+  useEffect(() => {
+    if (!remember) {
+      localStorage.removeItem("remember_branch");
+    }
+  }, [remember]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
     try {
-      const loginRes = await axios.post('/auth/login', new URLSearchParams({ username, password }), {
+      await axios.post('/auth/login', new URLSearchParams({ username, password }), {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
 
-      const token = loginRes.data.access_token;
-      const headers = { Authorization: `Bearer ${token}` };
-
-      // Gọi /auth/me để lấy user đầy đủ
-      const userRes = await axios.get('/auth/me', { headers });
+      const userRes = await axios.get('/auth/me');
       const userInfo = userRes.data;
 
-      // Lưu token + user
-      localStorage.setItem("access_token", token);
-      localStorage.setItem("user", JSON.stringify(userInfo));
+      // ✅ Lưu user và ghi nhớ nếu cần (chỉ lưu username)
+      localStorage.setItem('user', JSON.stringify(userInfo));
       if (remember) {
-        localStorage.setItem("remember_branch", btoa(JSON.stringify({ username, password })));
+        localStorage.setItem("remember_branch", btoa(JSON.stringify({ username })));
       } else {
         localStorage.removeItem("remember_branch");
       }
 
-      // Chuyển trang
       navigate("/user/dashboard");
     } catch (err) {
-      console.error("Login failed:", err);
-      setError("Đăng nhập thất bại. Vui lòng kiểm tra lại.");
+      localStorage.removeItem("remember_branch");
+      const msg = err.response?.data?.detail || err.message || "Đăng nhập thất bại. Vui lòng kiểm tra lại.";
+      setError(msg);
     }
   };
 
   return (
     <div className="flex justify-center items-center h-screen bg-gray-100">
-      <form className="bg-white p-6 rounded shadow-md w-96" onSubmit={handleLogin}>
-        <h2 className="text-xl font-bold mb-4 text-center">Hệ thống gửi báo cáo Công an tỉnh Quảng Bình</h2>
+      <form className="bg-white p-6 rounded shadow-md w-100" onSubmit={handleLogin}>
+        <h2 className="text-xl font-bold mb-4 text-center">Hệ thống gửi báo cáo Công an tỉnh Quảng Trị</h2>
         {error && <div className="text-red-600 text-sm mb-2">{error}</div>}
         <label className="block mb-2">Tên tài khoản:</label>
         <input type="text" className="w-full p-2 border rounded mb-4"
           value={username} onChange={(e) => setUsername(e.target.value)} required />
         <label className="block mb-2">Mật khẩu:</label>
-        <input type="password" className="w-full p-2 border rounded mb-4"
+        <input type={showPassword ? "text" : "password"} className="w-full p-2 border rounded mb-4"
           value={password} onChange={(e) => setPassword(e.target.value)} required />
-        <div className="flex items-center mb-4">
-          <input type="checkbox" id="remember" className="mr-2"
-            checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-          <label htmlFor="remember">Ghi nhớ đăng nhập</label>
+        <div className="mt-2">
+          <label className="inline-flex items-center">
+            <input
+              type="checkbox"
+              className="form-checkbox h-4 w-4"
+              checked={showPassword}
+              onChange={() => setShowPassword(!showPassword)}
+            />
+            <span className="ml-2 text-sm text-gray-700">Hiện mật khẩu</span>
+          </label>
         </div>
         <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700">
           Đăng nhập
         </button>
+        <div className="flex items-center mb-4 mt-2">
+          <input type="checkbox" id="remember" className="mr-2"
+            checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+          <label htmlFor="remember">Ghi nhớ đăng nhập</label>
+        </div>
       </form>
     </div>
   );
@@ -8087,11 +8506,9 @@ const PeriodManager = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const { setActiveTab, setSelectedPeriodId } = useContext(DashboardContext);
 
-  const fetchReportCount = async (periodId, token) => {
+  const fetchReportCount = async (periodId) => {
     try {
-      const res = await axios.get(`/report/admin/${periodId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await axios.get(`/admin/report/${periodId}`);
       return res.data.length;
     } catch (err) {
       console.error(`Lỗi khi lấy báo cáo cho period ${periodId}:`, err);
@@ -8101,17 +8518,21 @@ const PeriodManager = () => {
 
   const fetchData = async () => {
     try {
-      const token = localStorage.getItem("admin_token");
-      const response = await axios.get("/period", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await axios.get("/admin/period");
 
       const periodsWithCounts = await Promise.all(
         response.data.map(async (p) => {
-          const count = await fetchReportCount(p.ID, token);
+          const count = await fetchReportCount(p.ID);
           return { ...p, reportCount: count };
         })
       );
+
+      // Sắp xếp theo mốc thời gian kích hoạt gần nhất (max của min(ActiveAt, XaActiveAt))
+      periodsWithCounts.sort((a, b) => {
+        const minA = new Date(Math.min(new Date(a.ActiveAt), new Date(a.XaActiveAt || a.ActiveAt)));
+        const minB = new Date(Math.min(new Date(b.ActiveAt), new Date(b.XaActiveAt || b.ActiveAt)));
+        return minB - minA; // giảm dần: mới nhất ở trên
+      });
 
       setPeriods(periodsWithCounts);
       setFiltered(periodsWithCounts);
@@ -8138,48 +8559,41 @@ const PeriodManager = () => {
   };
 
   const handleDeactivate = async (period) => {
-  const confirmed = window.confirm(`Bạn có chắc muốn huỷ kích hoạt kỳ báo cáo "${period.Name}"?`);
-  if (!confirmed) return;
+    const confirmed = window.confirm(`Bạn có chắc muốn huỷ kích hoạt kỳ báo cáo "${period.Name}"?`);
+    if (!confirmed) return;
 
-  try {
-    const token = localStorage.getItem("admin_token");
-    const res = await axios.put(`/period/${period.ID}`, {
-      Name: period.Name,
-      Status: "INACTIVE",
-      XaStatus: "INACTIVE",
-      Killer: "Admin",
-    }, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    try {
+      const res = await axios.put(`/admin/period/${period.ID}`, {
+        Name: period.Name,
+        Status: "INACTIVE",
+        XaStatus: "INACTIVE",
+        Killer: "Admin",
+      });
+      alert("✅ Đã huỷ kích hoạt kỳ báo cáo.");
+      fetchData(); // reload lại danh sách
+    } catch (err) {
+      alert("❌ Lỗi khi huỷ kích hoạt: " + (err.response?.data?.detail || err.message));
+    }
+  };
+  const handleReactivate = async (period) => {
+    const confirmed = window.confirm(`Bạn có chắc muốn kích hoạt lại kỳ báo cáo "${period.Name}"?`);
+    if (!confirmed) return;
 
-    alert("✅ Đã huỷ kích hoạt kỳ báo cáo.");
-    fetchData(); // reload lại danh sách
-  } catch (err) {
-    alert("❌ Lỗi khi huỷ kích hoạt: " + (err.response?.data?.detail || err.message));
-  }
-};
-const handleReactivate = async (period) => {
-  const confirmed = window.confirm(`Bạn có chắc muốn kích hoạt lại kỳ báo cáo "${period.Name}"?`);
-  if (!confirmed) return;
-
-  try {
-    const token = localStorage.getItem("admin_token");
-    const res = await axios.put(`/period/${period.ID}`, {
-      Name: period.Name,
-      Status: "Active",
-      XaStatus: "Active",
-      Killer: "Admin",
-    }, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    alert("✅ Đã kích hoạt lại kỳ báo cáo.");
-    fetchData(); // reload lại danh sách
-  } catch (err) {
-    alert("❌ Lỗi khi kích hoạt lại: " + (err.response?.data?.detail || err.message));
-  }
-};
-
+    try {
+      const res = await axios.put(`/admin/period/${period.ID}`, {
+        Name: period.Name,
+        Status: "Active",
+        XaStatus: "Active",
+        Killer: "Admin",
+      });
+      alert("✅ Đã kích hoạt lại kỳ báo cáo.");
+      fetchData(); // reload lại danh sách
+    } catch (err) {
+      alert("❌ Lỗi khi kích hoạt lại: " + (err.response?.data?.detail || err.message));
+    }
+  };
+  const formatDateTime = (dateStr) =>
+    new Date(dateStr).toLocaleString("vi-VN", { hour12: false });
   const pageCount = Math.ceil(filtered.length / PAGE_SIZE);
   const currentData = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
@@ -8199,20 +8613,20 @@ const handleReactivate = async (period) => {
       <div className="overflow-x-auto">
         <table className="w-full text-sm border">
           <thead className="bg-gray-100 text-xs">
-  <tr>
-    <th className="border px-2 py-1 w-20">ID</th>
-    <th className="border px-2 py-1 w-40">Tên</th>
-    <th className="border px-2 py-1 w-24">Loại</th>
-    <th className="border px-2 py-1 w-48">Active → Deactive</th>
-    <th className="border px-2 py-1 w-40">Start → End</th>
-    <th className="border px-2 py-1 w-40">From → To</th>
-    <th className="border px-2 py-1 w-48">XaActive → XaDeactive</th>
-    <th className="border px-2 py-1 w-40">XaStart → XaEnd</th>
-    <th className="border px-2 py-1 w-40">XaFrom → XaTo</th>
-    <th className="border px-2 py-1 w-24">Trạng thái</th>
-    <th className="border px-2 py-1 w-16">#BC</th>
-    <th className="border px-2 py-1 w-28">Thao tác</th>
-  </tr>
+            <tr>
+              <th className="border px-2 py-1 w-20">ID</th>
+              <th className="border px-2 py-1 w-40">Tên</th>
+              <th className="border px-2 py-1 w-24">Loại</th>
+              <th className="border px-2 py-1 w-48">Active → Deactive</th>
+              <th className="border px-2 py-1 w-40">Start → End</th>
+              <th className="border px-2 py-1 w-40">From → To</th>
+              <th className="border px-2 py-1 w-48">XaActive → XaDeactive</th>
+              <th className="border px-2 py-1 w-40">XaStart → XaEnd</th>
+              <th className="border px-2 py-1 w-40">XaFrom → XaTo</th>
+              <th className="border px-2 py-1 w-24">Trạng thái</th>
+              <th className="border px-2 py-1 w-16">#BC</th>
+              <th className="border px-2 py-1 w-28">Thao tác</th>
+            </tr>
           </thead>
           <tbody>
             {currentData.map((p) => (
@@ -8227,37 +8641,37 @@ const handleReactivate = async (period) => {
                 <td className="border px-2 py-1">{p.ID}</td>
                 <td className="border px-2 py-1">{p.Name}</td>
                 <td className="border px-2 py-1">{p.TYPE}</td>
-                <td className="border px-2 py-1">{new Date(p.ActiveAt).toLocaleString()} → {new Date(p.DeactiveAt).toLocaleString()}</td>
-                <td className="border px-2 py-1">{new Date(p.StartAt).toLocaleTimeString()} → {new Date(p.EndAt).toLocaleTimeString()}</td>
-                <td className="border px-2 py-1">{new Date(p.FromAt).toLocaleTimeString()} → {new Date(p.ToAt).toLocaleTimeString()}</td>
-                <td className="border px-2 py-1">{new Date(p.XaActiveAt).toLocaleString()} → {new Date(p.XaDeactiveAt).toLocaleString()}</td>
-                <td className="border px-2 py-1">{new Date(p.XaStartAt).toLocaleTimeString()} → {new Date(p.XaEndAt).toLocaleTimeString()}</td>
-                <td className="border px-2 py-1">{new Date(p.XaFromAt).toLocaleTimeString()} → {new Date(p.XaToAt).toLocaleTimeString()}</td>
+                <td className="border px-2 py-1">{formatDateTime(p.ActiveAt)} → {formatDateTime(p.DeactiveAt)}</td>
+                <td className="border px-2 py-1">{formatDateTime(p.StartAt)} → {formatDateTime(p.EndAt)}</td>
+                <td className="border px-2 py-1">{formatDateTime(p.FromAt)} → {formatDateTime(p.ToAt)}</td>
+                <td className="border px-2 py-1">{formatDateTime(p.XaActiveAt)} → {formatDateTime(p.XaDeactiveAt)}</td>
+                <td className="border px-2 py-1">{formatDateTime(p.XaStartAt)} → {formatDateTime(p.XaEndAt)}</td>
+                <td className="border px-2 py-1">{formatDateTime(p.XaFromAt)} → {formatDateTime(p.XaToAt)}</td>
                 <td className="border px-2 py-1 text-center">{p.Status} / {p.XaStatus}</td>
                 <td className="border px-2 py-1 text-center">{p.reportCount}</td>
                 <td className="border px-2 py-1 text-center space-x-1">
-                {p.Status === "Active" || p.XaStatus === "Active" ? (
-                  <button
-                    className="text-red-600 hover:underline text-xs"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeactivate(p);
-                    }}
-                  >
-                    Huỷ kích hoạt
-                  </button>
-                ) : (
-                  <button
-                    className="text-green-600 hover:underline text-xs"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleReactivate(p);
-                    }}
-                  >
-                    Kích hoạt lại
-                  </button>
-                )}
-              </td>
+                  {p.Status === "Active" || p.XaStatus === "Active" ? (
+                    <button
+                      className="text-red-600 hover:underline text-xs"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeactivate(p);
+                      }}
+                    >
+                      Huỷ kích hoạt
+                    </button>
+                  ) : (
+                    <button
+                      className="text-green-600 hover:underline text-xs"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleReactivate(p);
+                      }}
+                    >
+                      Kích hoạt lại
+                    </button>
+                  )}
+                </td>
 
               </tr>
             ))}
@@ -8265,38 +8679,38 @@ const handleReactivate = async (period) => {
 
 
         </table>
-            <div className="mt-2 flex justify-center items-center">
-  <div className="flex items-center gap-2">
-    <button
-      className="px-3 py-1 border rounded hover:bg-gray-200"
-      disabled={currentPage === 1}
-      onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-    >
-      ← Trước
-    </button>
-    <span>Trang:</span>
-    <input
-      type="number"
-      min={1}
-      max={pageCount}
-      value={currentPage}
-      onChange={(e) =>
-        setCurrentPage(
-          Math.min(pageCount, Math.max(1, Number(e.target.value)))
-        )
-      }
-      className="border px-2 py-1 w-16 rounded"
-    />
-    <button
-      className="px-3 py-1 border rounded hover:bg-gray-200"
-      disabled={currentPage === pageCount}
-      onClick={() => setCurrentPage((p) => Math.min(p + 1, pageCount))}
-    >
-      Sau →
-    </button>
-    <span className="text-sm text-gray-500 ml-2">Tổng: {pageCount} trang</span>
-  </div>
-</div>
+        <div className="mt-2 flex justify-center items-center">
+          <div className="flex items-center gap-2">
+            <button
+              className="px-3 py-1 border rounded hover:bg-gray-200"
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+            >
+              ← Trước
+            </button>
+            <span>Trang:</span>
+            <input
+              type="number"
+              min={1}
+              max={pageCount}
+              value={currentPage}
+              onChange={(e) =>
+                setCurrentPage(
+                  Math.min(pageCount, Math.max(1, Number(e.target.value)))
+                )
+              }
+              className="border px-2 py-1 w-16 rounded"
+            />
+            <button
+              className="px-3 py-1 border rounded hover:bg-gray-200"
+              disabled={currentPage === pageCount}
+              onClick={() => setCurrentPage((p) => Math.min(p + 1, pageCount))}
+            >
+              Sau →
+            </button>
+            <span className="text-sm text-gray-500 ml-2">Tổng: {pageCount} trang</span>
+          </div>
+        </div>
         {filtered.length === 0 && (
           <p className="text-center mt-4 text-gray-500">Không tìm thấy kỳ báo cáo nào.</p>
         )}
@@ -8318,15 +8732,15 @@ const ReportHistory = () => {
   const [reports, setReports] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 10;
-  
+
   const [filters, setFilters] = useState({
-  Sender: "",
-  ReportPeriodName: "",
-  Blake3sum: "",
-  OriFileName: "",
-  SentAt: "",
-  Comment: "",
-});
+    Sender: "",
+    ReportPeriodName: "",
+    Blake3sum: "",
+    OriFileName: "",
+    SentAt: "",
+    Comment: "",
+  });
   const filteredReports = reports.filter((r) =>
     Object.entries(filters).every(([key, value]) =>
       r[key]?.toString().toLowerCase().includes(value.toLowerCase())
@@ -8337,181 +8751,222 @@ const ReportHistory = () => {
     (currentPage - 1) * rowsPerPage,
     currentPage * rowsPerPage
   );
+
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    if (token) {
-      axios
-        .get("/report/reports", {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-        .then((res) => setReports(res.data))
-        .catch((err) => console.error("Lỗi tải lịch sử báo cáo:", err));
-    }
+    axios
+      .get("/report/reports")
+      .then((res) => {
+        const sorted = res.data.sort(
+          (a, b) => new Date(b.SentAt) - new Date(a.SentAt)
+        );
+        setReports(sorted);
+      })
+      .catch((err) => console.error("Lỗi tải lịch sử báo cáo:", err));
   }, []);
+
+
   const handleExportExcel = () => {
-  const data = reports.map((r) => ({
-    "Tên đơn vị": r.Sender,
-    "Tên kỳ báo cáo": r.ReportPeriodName,
-    "Blake3sum": r.Blake3sum,
-    "Tên file": r.OriFileName,
-    "Thời gian gửi": new Date(r.SentAt).toLocaleString("vi-VN"),
-    "Ghi chú": r.Comment || "",
-    "Có sự kiện": r.HasEvent ? "✓" : "",
-    "Thời hạn": r.LateSeconds === 0
-      ? "Đúng hạn"
-      : r.LateSeconds < 0
-        ? `Trước hạn ${Math.abs(r.LateSeconds)} giây`
-        : `Quá hạn ${r.LateSeconds} giây`
-  }));
+    const data = reports.map((r) => ({
+      "Tên đơn vị": r.Sender,
+      "Tên kỳ báo cáo": r.ReportPeriodName,
+      "Blake3sum": r.Blake3sum,
+      "Tên file": r.OriFileName,
+      "Thời gian gửi": new Date(r.SentAt).toLocaleString("vi-VN"),
+      "Ghi chú": r.Comment || "",
+      "Có sự kiện": r.HasEvent ? "✓" : "",
+      "Thời hạn": r.LateSeconds === 0
+        ? "Đúng hạn"
+        : r.LateSeconds < 0
+          ? `Trước hạn ${Math.abs(r.LateSeconds)} giây`
+          : `Quá hạn ${r.LateSeconds} giây`
+    }));
 
-  const worksheet = XLSX.utils.json_to_sheet(data);
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, "Lịch sử báo cáo");
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Lịch sử báo cáo");
 
-  const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-  const blob = new Blob([excelBuffer], { type: "application/octet-stream" });
-  saveAs(blob, `lich_su_bao_cao_${new Date().toISOString().slice(0, 10)}.xlsx`);
-};
+    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([excelBuffer], { type: "application/octet-stream" });
+    saveAs(blob, `lich_su_bao_cao_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+  const handleDownload = async (periodId) => {
+    try {
+      const response = await axios.get(`/report/download/me/${periodId}`, {
+        responseType: "blob",
+      });
+
+      const contentDisposition = response.headers["content-disposition"];
+      let filename = "baocao.docx";
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename\*=utf-8''(.+)/i);
+        if (match) {
+          filename = decodeURIComponent(match[1]);
+        } else {
+          const fallback = contentDisposition.match(/filename="?(.+?)"?$/);
+          if (fallback) {
+            filename = fallback[1];
+          }
+        }
+      }
+
+      const blob = new Blob([response.data], { type: "application/octet-stream" });
+      saveAs(blob, filename);
+    } catch (error) {
+      if (error.response?.status === 404) {
+        alert(error.response.data.detail || "Không có báo cáo hoặc file không còn tồn tại.");
+      } else {
+        alert("Tải file thất bại.");
+        console.error("Download error:", error);
+      }
+    }
+  };
 
   return (
-  <div className="p-4 h-full overflow-hidden flex flex-col">
-    <h2 className="text-2xl font-bold mb-4 text-center">LỊCH SỬ BÁO CÁO</h2>
-    
-    <div className="flex-1 overflow-auto border rounded bg-white">
-      <table className="table-auto w-full text-sm text-left border-collapse">
-        <thead>
-          <tr className="bg-gray-100 text-sm font-semibold">
-            <th className="px-2 py-1">Tên đơn vị</th>
-            <th className="px-2 py-1">Tên kỳ báo cáo</th>
-            <th className="px-2 py-1">Blake3sum</th>
-            <th className="px-2 py-1">Tên file</th>
-            <th className="px-2 py-1">Thời gian gửi</th>
-            <th className="px-2 py-1">Ghi chú</th>
-            <th className="px-2 py-1">Sự kiện</th>
-            <th className="px-2 py-1">Thời hạn</th>
-          </tr>
-          <tr className="bg-white text-xs">
-            <th>
-              <input
-                className="w-full border px-1 py-0.5 rounded"
-                value={filters.Sender}
-                onChange={(e) => setFilters({ ...filters, Sender: e.target.value })}
-              />
-            </th>
-            <th>
-              <input
-                className="w-full border px-1 py-0.5 rounded"
-                value={filters.ReportPeriodName}
-                onChange={(e) => setFilters({ ...filters, ReportPeriodName: e.target.value })}
-              />
-            </th>
-            <th>
-              <input
-                className="w-full border px-1 py-0.5 rounded"
-                value={filters.Blake3sum}
-                onChange={(e) => setFilters({ ...filters, Blake3sum: e.target.value })}
-              />
-            </th>
-            <th>
-              <input
-                className="w-full border px-1 py-0.5 rounded"
-                value={filters.OriFileName}
-                onChange={(e) => setFilters({ ...filters, OriFileName: e.target.value })}
-              />
-            </th>
-            <th>
-              <input
-                className="w-full border px-1 py-0.5 rounded"
-                value={filters.SentAt}
-                onChange={(e) => setFilters({ ...filters, SentAt: e.target.value })}
-              />
-            </th>
-            <th>
-              <input
-                className="w-full border px-1 py-0.5 rounded"
-                value={filters.Comment}
-                onChange={(e) => setFilters({ ...filters, Comment: e.target.value })}
-              />
-            </th>
-            <th></th>
-            <th></th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {paginatedReports.map((r) => (
-            <tr key={r.ID} className="border-t">
-              <td className="px-2 py-1 truncate">{r.Sender}</td>
-              <td className="px-2 py-1 break-words">{r.ReportPeriodName}</td>
-              <td className="px-2 py-1 break-all max-w-[150px]">
-                {r.Blake3sum}
-              </td>
-              <td className="px-2 py-1 break-words">{r.OriFileName}</td>
-              <td className="px-2 py-1">{new Date(r.SentAt).toLocaleString("vi-VN")}</td>
-              <td className="px-2 py-1 break-words">{r.Comment || ""}</td>
-              <td className="px-2 py-1 text-center">{r.HasEvent ? "✓" : ""}</td>
-              <td className="px-2 py-1">
-                {typeof r.LateSeconds === "number"
-                  ? r.LateSeconds === 0
-                    ? "Đúng hạn"
-                    : r.LateSeconds < 0
-                      ? `Trước hạn ${Math.abs(r.LateSeconds)} giây`
-                      : `Quá hạn ${r.LateSeconds} giây`
-                  : ""}
-              </td>
+    <div className="p-4 h-full overflow-hidden flex flex-col">
+      <h2 className="text-2xl font-bold mb-4 text-center">LỊCH SỬ BÁO CÁO</h2>
+      <div className="flex-1 overflow-auto border rounded bg-white">
+        <table className="table-auto w-full text-sm text-left border-collapse">
+          <thead>
+            <tr className="bg-gray-100 text-sm font-semibold">
+              <th className="px-2 py-1">Tên đơn vị</th>
+              <th className="px-2 py-1">Tên kỳ báo cáo</th>
+              <th className="px-2 py-1">Blake3sum</th>
+              <th className="px-2 py-1">Tên file</th>
+              <th className="px-2 py-1">Thời gian gửi</th>
+              <th className="px-2 py-1">Ghi chú</th>
+              <th className="px-2 py-1">Sự kiện</th>
+              <th className="px-2 py-1">Thời hạn</th>
+              <th className="px-2 py-1">Tương tác</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-    <div className="mt-1 flex flex-wrap justify-center gap-5 mb-1">
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          className="px-3 py-1 border rounded hover:bg-gray-200"
-          disabled={currentPage === 1}
-          onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-        >
-          ← Trước
-        </button>
-        <div className="flex items-center gap-2">
-          Trang:
-          <input
-            type="number"
-            value={currentPage}
-            min={1}
-            max={totalPages}
-            onChange={(e) =>
-              setCurrentPage(Math.min(totalPages, Math.max(1, Number(e.target.value))))
-            }
-            className="border px-2 py-1 w-16 rounded"
-          />
+            <tr className="bg-white text-xs">
+              <th>
+                <input
+                  className="w-full border px-1 py-0.5 rounded"
+                  value={filters.Sender}
+                  onChange={(e) => setFilters({ ...filters, Sender: e.target.value })}
+                />
+              </th>
+              <th>
+                <input
+                  className="w-full border px-1 py-0.5 rounded"
+                  value={filters.ReportPeriodName}
+                  onChange={(e) => setFilters({ ...filters, ReportPeriodName: e.target.value })}
+                />
+              </th>
+              <th>
+                <input
+                  className="w-full border px-1 py-0.5 rounded"
+                  value={filters.Blake3sum}
+                  onChange={(e) => setFilters({ ...filters, Blake3sum: e.target.value })}
+                />
+              </th>
+              <th>
+                <input
+                  className="w-full border px-1 py-0.5 rounded"
+                  value={filters.OriFileName}
+                  onChange={(e) => setFilters({ ...filters, OriFileName: e.target.value })}
+                />
+              </th>
+              <th>
+                <input
+                  className="w-full border px-1 py-0.5 rounded"
+                  value={filters.SentAt}
+                  onChange={(e) => setFilters({ ...filters, SentAt: e.target.value })}
+                />
+              </th>
+              <th>
+                <input
+                  className="w-full border px-1 py-0.5 rounded"
+                  value={filters.Comment}
+                  onChange={(e) => setFilters({ ...filters, Comment: e.target.value })}
+                />
+              </th>
+              <th></th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {paginatedReports.map((r) => (
+              <tr key={r.ID} className="border-t">
+                <td className="px-2 py-1 truncate">{r.Sender}</td>
+                <td className="px-2 py-1 break-words">{r.ReportPeriodName}</td>
+                <td className="px-2 py-1 break-all max-w-[150px]">
+                  {r.Blake3sum}
+                </td>
+                <td className="px-2 py-1 break-words">{r.OriFileName}</td>
+                <td className="px-2 py-1">{new Date(r.SentAt).toLocaleString("vi-VN")}</td>
+                <td className="px-2 py-1 break-words">{r.Comment || ""}</td>
+                <td className="px-2 py-1 text-center">{r.HasEvent ? "✓" : ""}</td>
+                <td className="px-2 py-1">
+                  {typeof r.LateSeconds === "number"
+                    ? r.LateSeconds === 0
+                      ? "Đúng hạn"
+                      : r.LateSeconds < 0
+                        ? `Trước hạn ${Math.abs(r.LateSeconds)} giây`
+                        : `Quá hạn ${r.LateSeconds} giây`
+                    : ""}
+                </td>
+                <td className="px-2 py-1 text-center">
+                  <button
+                    className="text-blue-600 underline hover:text-blue-800"
+                    onClick={() => handleDownload(r.PeriodID)}
+                  >
+                    Tải về
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-1 flex flex-wrap justify-center gap-5 mb-1">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             className="px-3 py-1 border rounded hover:bg-gray-200"
-            onClick={() => setCurrentPage(currentPage)}
+            disabled={currentPage === 1}
+            onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
           >
-            Go
+            ← Trước
           </button>
+          <div className="flex items-center gap-2">
+            Trang:
+            <input
+              type="number"
+              value={currentPage}
+              min={1}
+              max={totalPages}
+              onChange={(e) =>
+                setCurrentPage(Math.min(totalPages, Math.max(1, Number(e.target.value))))
+              }
+              className="border px-2 py-1 w-16 rounded"
+            />
+            <button
+              className="px-3 py-1 border rounded hover:bg-gray-200"
+              onClick={() => setCurrentPage(currentPage)}
+            >
+              Go
+            </button>
+          </div>
+          <button
+            className="px-3 py-1 border rounded hover:bg-gray-200"
+            disabled={currentPage === totalPages}
+            onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+          >
+            Sau →
+          </button>
+
+          <span className="text-sm text-gray-500 ml-4">
+            Tổng số trang: {totalPages}
+          </span>
         </div>
         <button
-          className="px-3 py-1 border rounded hover:bg-gray-200"
-          disabled={currentPage === totalPages}
-          onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-        >
-          Sau →
+          onClick={handleExportExcel}
+          className="bg-blue-600 text-white px-4 py-1 rounded hover:bg-blue-700 mt-1 right-0">
+          Xuất Excel
         </button>
-
-        <span className="text-sm text-gray-500 ml-4">
-          Tổng số trang: {totalPages}
-        </span>
       </div>
-      <button 
-      onClick={handleExportExcel}
-      className="bg-blue-600 text-white px-4 py-1 rounded hover:bg-blue-700 mt-1 right-0">
-        Xuất Excel
-      </button>
     </div>
-  </div>
-);
+  );
 
 };
 
@@ -8536,121 +8991,160 @@ const ReportSummary = () => {
   const [totalReports, setTotalReports] = useState(0);
   const { selectedPeriodId } = useContext(DashboardContext);
 
-  const token = localStorage.getItem("admin_token");
-
   const [currentPage, setCurrentPage] = useState(1);
-    const [filters, setFilters] = useState({
+  const [filters, setFilters] = useState({
     Sender: "",
     OriFileName: "",
     Comment: "",
     Blake3sum: "",
-    });
-    const rowsPerPage = 10;
+  });
+  const rowsPerPage = 10;
 
-    const filteredReports = reports.filter((r) =>
+  const filteredReports = reports.filter((r) =>
     Object.entries(filters).every(([key, value]) =>
-        r[key]?.toString().toLowerCase().includes(value.toLowerCase())
+      r[key]?.toString().toLowerCase().includes(value.toLowerCase())
     )
-    );
+  );
 
-const paginatedReports = filteredReports.slice(
-  (currentPage - 1) * rowsPerPage,
-  currentPage * rowsPerPage
-);
-const totalPages = Math.ceil(filteredReports.length / rowsPerPage);
+  const paginatedReports = filteredReports.slice(
+    (currentPage - 1) * rowsPerPage,
+    currentPage * rowsPerPage
+  );
+  const totalPages = Math.ceil(filteredReports.length / rowsPerPage);
 
   const handleExportExcel = () => {
-  const data = reports.map((r) => ({
-    "Tài khoản": r.Sender,
-    "Gửi lúc": new Date(r.SentAt).toLocaleString("vi-VN"),
-    "Trễ (giây)": r.LateSeconds,
-    "Tên file": r.FileName,
-    "Có sự kiện": r.HasEvent ? "✓" : "",
-    "Ghi chú": r.Comment || "",
-    "Blake3sum": r.Blake3sum,
-  }));
+    const data = reports.map((r) => ({
+      "Tài khoản": r.Sender,
+      "Gửi lúc": new Date(r.SentAt).toLocaleString("vi-VN"),
+      "Trễ (giây)": r.LateSeconds,
+      "Tên file": r.FileName,
+      "Có sự kiện": r.HasEvent ? "✓" : "",
+      "Ghi chú": r.Comment || "",
+      "Blake3sum": r.Blake3sum,
+    }));
 
-  const worksheet = XLSX.utils.json_to_sheet(data);
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, "Thống kê báo cáo");
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Thống kê báo cáo");
 
-  const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-  const blob = new Blob([excelBuffer], { type: "application/octet-stream" });
-  saveAs(blob, `thong_ke_bao_cao_${new Date().toISOString().slice(0, 10)}.xlsx`);
-};
+    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([excelBuffer], { type: "application/octet-stream" });
+    saveAs(blob, `thong_ke_bao_cao_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
 
   useEffect(() => {
-    axios.get("/admin/loaibaocao", {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    .then(res => {
-    console.log("Loaibaocao response:", res.data);
-      if (Array.isArray(res.data)) {
-      setReportTypes(res.data);
-      if (res.data.length > 0) setSelectedType(res.data[0].ID);
-    } else {
-      console.warn("Dữ liệu loaibaocao không phải mảng:", res.data);
-    }
-    });
+    axios.get("/admin/reporttype")
+      .then(res => {
+        console.log("reporttype response:", res.data);
+        if (Array.isArray(res.data)) {
+          setReportTypes(res.data);
+          if (res.data.length > 0) setSelectedType(res.data[0].ID);
+        } else {
+          console.warn("Dữ liệu reporttype không phải mảng:", res.data);
+        }
+      });
   }, []);
 
   useEffect(() => {
-  if (!selectedType) return;
-  axios.get("/period", {
-    headers: { Authorization: `Bearer ${token}` },
-  }).then(res => {
-    const filtered = res.data
-      .filter(p => p.TYPE === selectedType)
-      .sort((a, b) => new Date(b.ActiveAt) - new Date(a.ActiveAt))
-      .slice(0, 10);
-    setPeriods(filtered);
-    if (selectedPeriodId) {
-  const matchedPeriod = res.data.find(p => p.ID === selectedPeriodId);
-  if (matchedPeriod) {
-    setSelectedType(matchedPeriod.TYPE); // 🟢 cập nhật loại báo cáo
-    setSelectedPeriod(matchedPeriod);
-    setPeriods(res.data.filter(p => p.TYPE === matchedPeriod.TYPE));
-    return;
-  }
-}
-if (filtered.length > 0) {
-  setSelectedPeriod(filtered[0]);
-}
-  });
-}, [selectedType, selectedPeriodId]);
+    if (!selectedType) return;
+    axios.get("/admin/period").then(res => {
+      const filtered = res.data
+        .filter(p => p.TYPE === selectedType)
+        .sort((a, b) => new Date(b.ActiveAt) - new Date(a.ActiveAt))
+        .slice(0, 10);
+      setPeriods(filtered);
+      if (selectedPeriodId) {
+        const matchedPeriod = res.data.find(p => p.ID === selectedPeriodId);
+        if (matchedPeriod) {
+          setSelectedType(matchedPeriod.TYPE); // 🟢 cập nhật loại báo cáo
+          setSelectedPeriod(matchedPeriod);
+          setPeriods(res.data.filter(p => p.TYPE === matchedPeriod.TYPE));
+          return;
+        }
+      }
+      if (filtered.length > 0) {
+        setSelectedPeriod(filtered[0]);
+      }
+    });
+  }, [selectedType, selectedPeriodId]);
 
   useEffect(() => {
     if (!selectedPeriod) return;
-    axios.get(`/report/admin/${selectedPeriod.ID}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    }).then(res => {
-      setReports(res.data);
-      setTotalReports(res.data.length);
+    axios.get(`/admin/report/${selectedPeriod.ID}`).then(res => {
+      const sorted = res.data.sort((a, b) => new Date(b.SentAt) - new Date(a.SentAt));
+      setReports(sorted);
+      setTotalReports(sorted.length);
     });
   }, [selectedPeriod]);
 
-const handleDownloadZip = async () => {
-  if (!selectedPeriod) return;
-  try {
-    const response = await axios.get(`/report/download/${selectedPeriod.ID}`, {
-      responseType: "blob",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const blob = new Blob([response.data], { type: "application/zip" });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", `${selectedPeriod.ID}.zip`);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.URL.revokeObjectURL(url);
-  } catch (error) {
-    alert("Không thể tải file. Bạn có quyền admin không?");
-    console.error(error);
-  }
-};
+  const handleDownloadZip = async () => {
+    if (!selectedPeriod) return;
+    try {
+      const response = await axios.get(`/admin/report/download/${selectedPeriod.ID}`, {
+        responseType: "blob",
+      });
+      const blob = new Blob([response.data], { type: "application/zip" });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `${selectedPeriod.ID}.zip`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      alert("Không thể tải file. Bạn có quyền admin không?");
+      console.error(error);
+    }
+  };
+  const handleDownloadOne = async (sender, periodId, filename) => {
+    try {
+      const response = await axios.get(`/admin/report/download/${periodId}/sender/${sender}`, {
+        responseType: "blob",
+      });
+      const blob = new Blob([response.data], { type: "application/octet-stream" });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", filename || `${sender}_${periodId}.dat`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      alert("Không thể tải báo cáo. Bạn có quyền admin không?");
+      console.error(error);
+    }
+  };
+  const handleExportMissingUnits = async () => {
+    if (!selectedPeriod) return;
+    try {
+      const response = await axios.get(`/admin/report/missing/${selectedPeriod.ID}`);
+      const data = response.data;
 
+      if (data.length === 0) {
+        alert("Tất cả đơn vị đã gửi báo cáo.");
+        return;
+      }
+
+      const excelData = data.map((item, index) => ({
+        "STT": index + 1,
+        "Tên tài khoản": item.username,
+        "Tên đơn vị": item.name,
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(excelData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Chưa gửi báo cáo");
+
+      const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+      const blob = new Blob([excelBuffer], { type: "application/octet-stream" });
+      saveAs(blob, `don_vi_chua_gui_${selectedPeriod.ID}.xlsx`);
+    } catch (error) {
+      alert("Không thể lấy danh sách đơn vị chưa gửi.");
+      console.error(error);
+    }
+  };
   return (
     <div className="p-6 space-y-6">
       <h1 className="text-xl font-bold">Tổng hợp kỳ báo cáo</h1>
@@ -8664,7 +9158,7 @@ const handleDownloadZip = async () => {
             <select className="border rounded p-1" value={selectedType} onChange={e => setSelectedType(e.target.value)}>
               {Array.isArray(reportTypes) && reportTypes.map(rt => (
                 <option key={rt.ID} value={rt.ID}>{rt.Name}</option>
-                ))}
+              ))}
             </select>
           </div>
           <div>
@@ -8682,35 +9176,41 @@ const handleDownloadZip = async () => {
         </div>
         {selectedPeriod && (
           <div className="grid text-sm">
-          <div className="grid grid-cols-2 md:grid-cols-2 gap-2 text-sm">
-            <div><b>Cấp phòng:</b>
-            <div key={"ActiveAt"}><b>{"Kích hoạt từ"}:</b> {new Date(selectedPeriod["ActiveAt"]).toLocaleString("vi-VN") ?? "-"}</div>
-            <div key={"DeactiveAt"}><b>{"Huỷ kích hoạt"}:</b> {new Date(selectedPeriod["DeactiveAt"]).toLocaleString("vi-VN") ?? "-"}</div>
-            <div key={"StartAt"}><b>{"Hạn nhận từ"}:</b> {new Date(selectedPeriod["StartAt"]).toLocaleString("vi-VN") ?? "-"}</div>
-            <div key={"EndAt"}><b>{"Hết hạn"}:</b> {new Date(selectedPeriod["EndAt"]).toLocaleString("vi-VN") ?? "-"}</div>
-            <div key={"Status"}><b>{"Trạng thái"}:</b> {selectedPeriod["Status"] ?? "-"}</div>
+            <div className="grid grid-cols-2 md:grid-cols-2 gap-2 text-sm">
+              <div><b>Cấp phòng:</b>
+                <div key={"ActiveAt"}><b>{"Kích hoạt từ"}:</b> {new Date(selectedPeriod["ActiveAt"]).toLocaleString("vi-VN") ?? "-"}</div>
+                <div key={"DeactiveAt"}><b>{"Huỷ kích hoạt"}:</b> {new Date(selectedPeriod["DeactiveAt"]).toLocaleString("vi-VN") ?? "-"}</div>
+                <div key={"StartAt"}><b>{"Hạn nhận từ"}:</b> {new Date(selectedPeriod["StartAt"]).toLocaleString("vi-VN") ?? "-"}</div>
+                <div key={"EndAt"}><b>{"Hết hạn"}:</b> {new Date(selectedPeriod["EndAt"]).toLocaleString("vi-VN") ?? "-"}</div>
+                <div key={"Status"}><b>{"Trạng thái"}:</b> {selectedPeriod["Status"] ?? "-"}</div>
+              </div>
+              <div><b>Cấp xã:</b>
+                <div key={"XaActiveAt"}><b>{"Kích hoạt từ"}:</b> {new Date(selectedPeriod["XaActiveAt"]).toLocaleString("vi-VN") ?? "-"}</div>
+                <div key={"XaDeactiveAt"}><b>{"Huỷ kích hoạt"}:</b> {new Date(selectedPeriod["XaDeactiveAt"]).toLocaleString("vi-VN") ?? "-"}</div>
+                <div key={"XaStartAt"}><b>{"Hạn nhận từ"}:</b> {new Date(selectedPeriod["XaStartAt"]).toLocaleString("vi-VN") ?? "-"}</div>
+                <div key={"XaEndAt"}><b>{"Hết hạn"}:</b> {new Date(selectedPeriod["XaEndAt"]).toLocaleString("vi-VN") ?? "-"}</div>
+                <div key={"XaStatus"}><b>{"Trạng thái"}:</b> {selectedPeriod["XaStatus"] ?? "-"}</div>
+              </div>
             </div>
-            <div><b>Cấp xã:</b>
-            <div key={"XaActiveAt"}><b>{"Kích hoạt từ"}:</b> {new Date(selectedPeriod["XaActiveAt"]).toLocaleString("vi-VN") ?? "-"}</div>
-            <div key={"XaDeactiveAt"}><b>{"Huỷ kích hoạt"}:</b> {new Date(selectedPeriod["XaDeactiveAt"]).toLocaleString("vi-VN") ?? "-"}</div>
-            <div key={"XaStartAt"}><b>{"Hạn nhận từ"}:</b> {new Date(selectedPeriod["XaStartAt"]).toLocaleString("vi-VN") ?? "-"}</div>
-            <div key={"XaEndAt"}><b>{"Hết hạn"}:</b> {new Date(selectedPeriod["XaEndAt"]).toLocaleString("vi-VN") ?? "-"}</div>
-            <div key={"XaStatus"}><b>{"Trạng thái"}:</b> {selectedPeriod["XaStatus"] ?? "-"}</div>
-            </div>
-          </div>
             <div><b>Tổng số báo cáo đã gửi:</b> {totalReports}</div>
             <div><b>Tổng số báo cáo đã gửi có sự kiện:</b> {reports.filter(r => r.HasEvent).length}</div>
             <div><b>Tổng số báo cáo đã gửi không có sự kiện:</b> {reports.filter(r => !r.HasEvent).length}</div>
             <div><b>Tổng số báo cáo đã gửi đúng hạn:</b> {reports.filter(r => r.LateSeconds === 0).length}</div>
             <div><b>Tổng số báo cáo đã gửi không đúng hạn:</b> {reports.filter(r => r.LateSeconds < 0).length}</div>
             <div className="flex items-center space-x-2">
-            <div key={"FolderPath"}><b>FolderPath:</b> {selectedPeriod["FolderPath"] ?? "-"}</div>
-            <button
-              className="bg-green-500 hover:bg-green-600 text-white text-sm px-3 py-1 rounded border"
-              onClick={handleDownloadZip}
-            >
-              Tải tất cả báo cáo (.zip)
-            </button>
+              <div key={"FolderPath"}><b>FolderPath:</b> {selectedPeriod["FolderPath"] ?? "-"}</div>
+              <button
+                className="bg-green-500 hover:bg-green-600 text-white text-sm px-3 py-1 rounded border"
+                onClick={handleDownloadZip}
+              >
+                Tải tất cả báo cáo (.zip)
+              </button>
+              <button
+                className="bg-yellow-500 hover:bg-yellow-600 text-white text-sm px-3 py-1 rounded border"
+                onClick={handleExportMissingUnits}
+              >
+                Đơn vị chưa gửi
+              </button>
             </div>
           </div>
         )}
@@ -8729,47 +9229,41 @@ const handleDownloadZip = async () => {
               <th className="border px-2 py-1">Có sự kiện</th>
               <th className="border px-2 py-1">Ghi chú</th>
               <th className="border px-2 py-1 max-w-[200px]">Blake3sum</th>
+              <th className="border px-2 py-1">Tải về</th>
             </tr>
             <tr className="bg-white text-xs">
-            <th>
+              <th>
                 <input
-                className="w-full border px-1 py-0.5 rounded"
-                placeholder="Tài khoản"
-                value={filters.Sender}
-                onChange={(e) => setFilters({ ...filters, Sender: e.target.value })}
+                  className="w-full border px-1 py-0.5 rounded"
+                  placeholder="Tài khoản"
+                  value={filters.Sender}
+                  onChange={(e) => setFilters({ ...filters, Sender: e.target.value })}
                 />
-            </th>
-            <th></th>
-            <th></th>
-            <th>
+              </th>
+              <th></th>
+              <th></th>
+              <th>
                 <input
-                className="w-full border px-1 py-0.5 rounded"
-                placeholder="Tên file"
-                value={filters.OriFileName}
-                onChange={(e) => setFilters({ ...filters, OriFileName: e.target.value })}
+                  className="w-full border px-1 py-0.5 rounded"
+                  placeholder="Tên file"
+                  value={filters.OriFileName}
+                  onChange={(e) => setFilters({ ...filters, OriFileName: e.target.value })}
                 />
-            </th>
-            <th></th>
-            <th>
+              </th>
+              <th></th>
+              <th>
                 <input
-                className="w-full border px-1 py-0.5 rounded"
-                placeholder="Ghi chú"
-                value={filters.Comment}
-                onChange={(e) => setFilters({ ...filters, Comment: e.target.value })}
+                  className="w-full border px-1 py-0.5 rounded"
+                  placeholder="Ghi chú"
+                  value={filters.Comment}
+                  onChange={(e) => setFilters({ ...filters, Comment: e.target.value })}
                 />
-            </th>
-            <th>
-                <input
-                className="w-full border px-1 py-0.5 rounded"
-                placeholder="Blake3sum"
-                value={filters.Blake3sum}
-                onChange={(e) => setFilters({ ...filters, Blake3sum: e.target.value })}
-                />
-            </th>
+              </th>
+              <th></th>
+              <th></th>
             </tr>
-
           </thead>
-          
+
           <tbody>
             {paginatedReports.map((r, i) => (
               <tr key={i} className="text-center">
@@ -8780,45 +9274,53 @@ const handleDownloadZip = async () => {
                 <td className="border px-2">{r.HasEvent ? "✅" : "❌"}</td>
                 <td className="border px-2">{r.Comment ?? ""}</td>
                 <td className="border px-2 max-w-[200px] truncate">{r.Blake3sum}</td>
+                <td className="border px-2">
+                  <button
+                    className="text-blue-600 hover:underline"
+                    onClick={() => handleDownloadOne(r.Sender, selectedPeriod.ID, r.FileName)}
+                  >
+                    Tải về
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
         <div className="mt-2 flex flex-wrap justify-between items-center">
-        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <button
-            className="px-3 py-1 border rounded hover:bg-gray-200"
-            disabled={currentPage === 1}
-            onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+              className="px-3 py-1 border rounded hover:bg-gray-200"
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
             >
-            ← Trước
+              ← Trước
             </button>
             <span>Trang:</span>
             <input
-            type="number"
-            min={1}
-            max={totalPages}
-            value={currentPage}
-            onChange={(e) =>
+              type="number"
+              min={1}
+              max={totalPages}
+              value={currentPage}
+              onChange={(e) =>
                 setCurrentPage(Math.min(totalPages, Math.max(1, Number(e.target.value))))
-            }
-            className="border px-2 py-1 w-16 rounded"
+              }
+              className="border px-2 py-1 w-16 rounded"
             />
             <button
-            className="px-3 py-1 border rounded hover:bg-gray-200"
-            disabled={currentPage === totalPages}
-            onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+              className="px-3 py-1 border rounded hover:bg-gray-200"
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
             >
-            Sau →
+              Sau →
             </button>
             <span className="text-sm text-gray-500 ml-2">Tổng: {totalPages} trang</span>
-        </div>
-        <button
+          </div>
+          <button
             onClick={handleExportExcel}
             className="bg-blue-600 text-white px-4 py-1 rounded hover:bg-blue-700"
-        >
+          >
             Xuất Excel
-        </button>
+          </button>
         </div>
 
       </div>
@@ -8829,12 +9331,345 @@ const handleDownloadZip = async () => {
 export default ReportSummary;
 
 
+===== FILE: frontend/src\pages\ReportTypeManager.jsx =====
+import React, { useEffect, useState } from "react";
+import axios from "../services/api";
+import * as XLSX from "xlsx";
+
+const ReportTypeManager = () => {
+    const [form, setForm] = useState({
+        Name: "",
+        Period_ID: "DAILY",
+        ActiveOffset: 0,
+        ActiveOn: 0,
+        ActiveAt: "00:00:00",
+        DeactiveOffset: 0,
+        DeactiveOn: 0,
+        DeactiveAt: "23:59:59",
+        StartOffset: 0,
+        StartOn: 0,
+        StartAt: "00:00:00",
+        EndOffset: 0,
+        EndOn: 0,
+        EndAt: "23:59:59",
+        FromOffset: 0,
+        FromOn: 0,
+        From: "00:00:00",
+        ToOffset: 0,
+        ToOn: 0,
+        To: "23:59:59",
+        XaActiveOffset: 0,
+        XaActiveOn: 0,
+        XaActiveAt: "00:00:00",
+        XaDeactiveOffset: 0,
+        XaDeactiveOn: 0,
+        XaDeactiveAt: "23:59:59",
+        XaStartOffset: 0,
+        XaStartOn: 0,
+        XaStartAt: "00:00:00",
+        XaEndOffset: 0,
+        XaEndOn: 0,
+        XaEndAt: "23:59:59",
+        XaFromOffset: 0,
+        XaFromOn: 0,
+        XaFromAt: "00:00:00",
+        XaToOffset: 0,
+        XaToOn: 0,
+        XaToAt: "23:59:59",
+        DocExtList: ".doc .docx .pdf .bm2 .jpg .xlsx .xls",
+        MaxSize: "100MB"
+    });
+    const [reportTypes, setReportTypes] = useState([]);
+    const [search, setSearch] = useState("");
+    const [periodFilter, setPeriodFilter] = useState("");
+    const fetchData = async () => {
+        try {
+            const response = await axios.get("/admin/reporttype");
+            setReportTypes(response.data);
+        } catch (error) {
+            console.error("Error fetching data:", error);
+        }
+    };
+
+    useEffect(() => {
+        fetchData();
+    }, []);
+
+    const handleChange = (e) => {
+        setForm({ ...form, [e.target.name]: e.target.value });
+    };
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        try {
+            await axios.post("/admin/reporttype", form);
+            fetchData();
+        } catch (error) {
+            console.error("Create failed:", error);
+        }
+    };
+
+    const handleDelete = async (id) => {
+        if (window.confirm("Bạn có chắc muốn xoá loại báo cáo này?")) {
+            try {
+                await axios.delete(`/admin/reporttype/${id}`);
+                fetchData();
+            } catch (error) {
+                console.error("Delete failed:", error);
+            }
+        }
+    };
+
+    const handleUpdate = async (e) => {
+        e.preventDefault();
+        if (!form.ID) return;
+        if (!window.confirm("Bạn có chắc muốn cập nhật loại báo cáo này?")) return;
+        try {
+            await axios.put(`/admin/reporttype/${form.ID}`, form);
+            setForm({ ...form, ID: undefined });
+            fetchData();
+        } catch (error) {
+            console.error("Update failed:", error);
+        }
+    };
+
+    const renderOffsetFields = (prefix) => (
+        <div className="grid grid-cols-3 gap-2">
+            {["Active", "Deactive", "Start", "End", "From", "To"].map((field) => (
+                <div key={field}>
+                    <label>{prefix}{field}:</label>
+                    <div className="flex gap-1">
+                        <input name={`${prefix}${field}Offset`} className="w-1/3" value={form[`${prefix}${field}Offset`]} onChange={handleChange} />
+                        <input name={`${prefix}${field}On`} className="w-1/3" value={form[`${prefix}${field}On`]} onChange={handleChange} />
+                        <input name={`${prefix}${field}${prefix === "Xa" ? "At" : field === "From" || field === "To" ? "" : "At"}`} className="w-1/3" value={form[`${prefix}${field}${prefix === "Xa" ? "At" : field === "From" || field === "To" ? "" : "At"}`]} onChange={handleChange} />
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+
+    const renderFieldCell = (label, value) => (
+        <div className="text-xs whitespace-nowrap"><strong>{label}:</strong> {value}</div>
+    );
+
+    const [currentPage, setCurrentPage] = useState(1);
+    const rowsPerPage = 10;
+
+    const filteredReports = reportTypes.filter(r =>
+        r.Name.toLowerCase().includes(search.toLowerCase()) &&
+        (periodFilter === "" || r.Period_ID === periodFilter)
+    );
+    const totalPages = Math.ceil(filteredReports.length / rowsPerPage);
+    const paginatedReports = filteredReports.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
+    const exportToExcel = () => {
+        const data = filteredReports.map(({ ID, Name, Period_ID, DateCreated, NextAt }) => ({
+            ID, Name, Period_ID,
+            DateCreated: new Date(DateCreated).toLocaleString("vi-VN"),
+            NextAt: NextAt ? new Date(NextAt).toLocaleString("vi-VN") : ""
+        }));
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "LoaiBaoCao");
+        XLSX.writeFile(workbook, "DanhSachLoaiBaoCao.xlsx");
+    };
+    return (
+        <div className="p-4">
+            <h1 className="text-xl font-bold mb-4">Quản lý Loại báo cáo</h1>
+
+            <form onSubmit={form.ID ? handleUpdate : handleSubmit} className="bg-white p-4 shadow rounded mb-6">
+                <div className="mb-4">
+                    <label className="block">Tên Loại báo cáo</label>
+                    <input name="Name" value={form.Name} onChange={handleChange} className="w-full border rounded p-1" />
+                </div>
+                <div className="mb-4">
+                    <label className="block">Định kỳ</label>
+                    <select name="Period_ID" value={form.Period_ID} onChange={handleChange} className="w-full border rounded p-1">
+                        {['DAILY', 'WEEKLY', 'MONTHLY', 'NONE'].map(p => <option key={p}>{p}</option>)}
+                    </select>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <h2 className="font-semibold">Cấp phòng</h2>
+                        {renderOffsetFields("")}
+                    </div>
+                    <div>
+                        <h2 className="font-semibold">Cấp xã</h2>
+                        {renderOffsetFields("Xa")}
+                    </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4 mt-4">
+                    <div>
+                        <label>Định dạng tệp hỗ trợ</label>
+                        <input name="DocExtList" value={form.DocExtList} onChange={handleChange} className="w-full border rounded p-1" />
+                    </div>
+                    <div>
+                        <label>Kích thước tối đa</label>
+                        <input name="MaxSize" value={form.MaxSize} onChange={handleChange} className="w-full border rounded p-1" />
+                    </div>
+                </div>
+                <div className="text-center mt-4 space-x-2">
+                    <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded">
+                        {form.ID ? "Cập nhật" : "Tạo mới"}
+                    </button>
+                    {form.ID && (
+                        <button type="button" className="bg-gray-400 text-white px-4 py-2 rounded" onClick={() => setForm({
+                            Name: "",
+                            Period_ID: "DAILY",
+                            ActiveOffset: 0,
+                            ActiveOn: 0,
+                            ActiveAt: "00:00:00",
+                            DeactiveOffset: 0,
+                            DeactiveOn: 0,
+                            DeactiveAt: "23:59:59",
+                            StartOffset: 0,
+                            StartOn: 0,
+                            StartAt: "00:00:00",
+                            EndOffset: 0,
+                            EndOn: 0,
+                            EndAt: "23:59:59",
+                            FromOffset: 0,
+                            FromOn: 0,
+                            From: "00:00:00",
+                            ToOffset: 0,
+                            ToOn: 0,
+                            To: "23:59:59",
+                            XaActiveOffset: 0,
+                            XaActiveOn: 0,
+                            XaActiveAt: "00:00:00",
+                            XaDeactiveOffset: 0,
+                            XaDeactiveOn: 0,
+                            XaDeactiveAt: "23:59:59",
+                            XaStartOffset: 0,
+                            XaStartOn: 0,
+                            XaStartAt: "00:00:00",
+                            XaEndOffset: 0,
+                            XaEndOn: 0,
+                            XaEndAt: "23:59:59",
+                            XaFromOffset: 0,
+                            XaFromOn: 0,
+                            XaFromAt: "00:00:00",
+                            XaToOffset: 0,
+                            XaToOn: 0,
+                            XaToAt: "23:59:59",
+                            DocExtList: ".doc .docx .pdf .bm2 .jpg .xlsx .xls",
+                            MaxSize: "100MB"
+                        })}>
+                            Huỷ sửa
+                        </button>
+                    )}
+                </div>
+            </form>
+
+            <h2 className="text-lg font-bold mb-2">Danh sách loại báo cáo</h2>
+            <div className="flex gap-2 mb-2">
+                <input
+                    type="text"
+                    placeholder="Tìm kiếm theo tên..."
+                    className="border rounded p-1 w-full"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                />
+                <select className="border rounded p-1" value={periodFilter} onChange={e => setPeriodFilter(e.target.value)}>
+                    <option value="">Tất cả</option>
+                    <option value="DAILY">DAILY</option>
+                    <option value="WEEKLY">WEEKLY</option>
+                    <option value="MONTHLY">MONTHLY</option>
+                    <option value="NONE">NONE</option>
+                </select>
+                <button className="bg-green-600 text-white px-3 rounded" onClick={() => exportToExcel()}>Xuất Excel</button>
+            </div>
+
+            <div className="overflow-x-auto">
+                <table className="table-auto min-w-full border text-sm">
+                    <thead>
+                        <tr className="bg-gray-100">
+                            <th className="border px-2 py-1">Tên</th>
+                            <th className="border px-2 py-1">Định kỳ</th>
+                            <th className="border px-2 py-1">Ngày tạo</th>
+                            <th className="border px-2 py-1">NextAt</th>
+                            <th className="border px-2 py-1">Chi tiết</th>
+                            <th className="border px-2 py-1">Thao tác</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {paginatedReports.map((r) => (
+                            <tr key={r.ID} className="hover:bg-gray-50 align-top">
+                                <td className="border px-2 py-1 whitespace-nowrap align-top">{r.Name}</td>
+                                <td className="border px-2 py-1 whitespace-nowrap align-top">{r.Period_ID}</td>
+                                <td className="border px-2 py-1 whitespace-nowrap align-top">{new Date(r.DateCreated).toLocaleString("vi-VN")}</td>
+                                <td className="border px-2 py-1 whitespace-nowrap align-top">{r.NextAt ? new Date(r.NextAt).toLocaleString("vi-VN") : ""}</td>
+                                <td className="border px-2 py-1 text-left">
+                                    {renderFieldCell("DocExtList", r.DocExtList)}
+                                    {renderFieldCell("MaxSize", r.MaxSize)}
+
+                                    {renderFieldCell("ActiveOffset", r.ActiveOffset)}
+                                    {renderFieldCell("ActiveOn", r.ActiveOn)}
+                                    {renderFieldCell("ActiveAt", r.ActiveAt)}
+                                    {renderFieldCell("DeactiveOffset", r.DeactiveOffset)}
+                                    {renderFieldCell("DeactiveOn", r.DeactiveOn)}
+                                    {renderFieldCell("DeactiveAt", r.DeactiveAt)}
+                                    {renderFieldCell("StartOffset", r.StartOffset)}
+                                    {renderFieldCell("StartOn", r.StartOn)}
+                                    {renderFieldCell("StartAt", r.StartAt)}
+                                    {renderFieldCell("EndOffset", r.EndOffset)}
+                                    {renderFieldCell("EndOn", r.EndOn)}
+                                    {renderFieldCell("EndAt", r.EndAt)}
+                                    {renderFieldCell("FromOffset", r.FromOffset)}
+                                    {renderFieldCell("FromOn", r.FromOn)}
+                                    {renderFieldCell("From", r.From)}
+                                    {renderFieldCell("ToOffset", r.ToOffset)}
+                                    {renderFieldCell("ToOn", r.ToOn)}
+                                    {renderFieldCell("To", r.To)}
+
+                                    {renderFieldCell("XaActiveOffset", r.XaActiveOffset)}
+                                    {renderFieldCell("XaActiveOn", r.XaActiveOn)}
+                                    {renderFieldCell("XaActiveAt", r.XaActiveAt)}
+                                    {renderFieldCell("XaDeactiveOffset", r.XaDeactiveOffset)}
+                                    {renderFieldCell("XaDeactiveOn", r.XaDeactiveOn)}
+                                    {renderFieldCell("XaDeactiveAt", r.XaDeactiveAt)}
+                                    {renderFieldCell("XaStartOffset", r.XaStartOffset)}
+                                    {renderFieldCell("XaStartOn", r.XaStartOn)}
+                                    {renderFieldCell("XaStartAt", r.XaStartAt)}
+                                    {renderFieldCell("XaEndOffset", r.XaEndOffset)}
+                                    {renderFieldCell("XaEndOn", r.XaEndOn)}
+                                    {renderFieldCell("XaEndAt", r.XaEndAt)}
+                                    {renderFieldCell("XaFromOffset", r.XaFromOffset)}
+                                    {renderFieldCell("XaFromOn", r.XaFromOn)}
+                                    {renderFieldCell("XaFromAt", r.XaFromAt)}
+                                    {renderFieldCell("XaToOffset", r.XaToOffset)}
+                                    {renderFieldCell("XaToOn", r.XaToOn)}
+                                    {renderFieldCell("XaToAt", r.XaToAt)}
+                                </td>
+                                <td className="border px-2 py-1 text-center">
+                                    <button onClick={() => setForm(r)} className="text-blue-600 hover:underline mr-2">Sửa</button>
+                                    <button onClick={() => handleDelete(r.ID)} className="text-red-600 hover:underline">Xoá</button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+                <div className="mt-2 flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                        <button className="px-3 py-1 border rounded hover:bg-gray-200" disabled={currentPage === 1} onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}>Trước</button>
+                        <span>Trang:</span>
+                        <input type="number" min={1} max={totalPages} value={currentPage} onChange={(e) => setCurrentPage(Math.min(totalPages, Math.max(1, Number(e.target.value))))} className="border px-2 py-1 w-16 rounded" />
+                        <button className="px-3 py-1 border rounded hover:bg-gray-200" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}>Sau</button>
+                        <span className="text-sm text-gray-500 ml-2">Tổng: {totalPages} trang</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+export default ReportTypeManager;
+
+
 ===== FILE: frontend/src\pages\UploadReport.jsx =====
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "../services/api";
 
-const UploadReport = ({ period, user }) => {
+const UploadReport = ({ period, user, serverTime, fetchedAt, onAfterSend }) => {
   const renderTimeStatusMessage = () => {
     if (!reportData || reportData.Status !== "sent") return "";
     const late = reportData.LateSeconds;
@@ -8843,7 +9678,6 @@ const UploadReport = ({ period, user }) => {
     return `– Bạn đã gửi quá hạn ${late} giây`;
   };
   const [file, setFile] = useState(null);
-  const [hasEvent, setHasEvent] = useState(false);
   const [timeStatus, setTimeStatus] = useState("");
   const [timeLeft, setTimeLeft] = useState("");
   const [buttonLabel, setButtonLabel] = useState("Gửi");
@@ -8852,34 +9686,50 @@ const UploadReport = ({ period, user }) => {
   const [reportData, setReportData] = useState(null);
   const [confirmResend, setConfirmResend] = useState(false);
   const [pendingSend, setPendingSend] = useState(false);
+  //const [serverTime, setServerTime] = useState(null);     // server trả về
+  //const [fetchedAt, setFetchedAt] = useState(null);       // thời điểm máy client nhận được
+  const [eventYes, setEventYes] = useState(false);
+  const [eventNo, setEventNo] = useState(false);
 
   const navigate = useNavigate();
 
   const fetchReportStatus = async () => {
     try {
-      const token = localStorage.getItem("access_token");
-      const res = await axios.get(`/report/${period?.ID}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await axios.get(`/report/${period?.ID}`);
       setReportData(res.data);
       setButtonLabel(res.data.Status === "sent" ? "Gửi lại" : "Gửi");
     } catch (err) {
       if (err.response?.status === 401) {
         localStorage.removeItem("access_token");
+        localStorage.removeItem("user");
         navigate("/login/branch");
       }
       console.error("Lỗi khi lấy trạng thái báo cáo:", err);
     }
   };
 
+  const getCurrentServerTime = () => {
+    if (!serverTime || !fetchedAt) return new Date();
+    const diff = Date.now() - fetchedAt; // mili giây trôi qua từ lúc fetch
+    return new Date(serverTime.getTime() + diff);
+  };
+
   const handleSend = async () => {
     if (!file) return alert("Vui lòng chọn file trước khi gửi!");
+    if (period?.ID?.toUpperCase().startsWith("DAILY")) {
+      if ((eventYes && eventNo) || (!eventYes && !eventNo)) {
+        return alert("Vui lòng chọn 1 trong 2: 'Có' hoặc 'Không có tình hình đáng chú ý'.");
+      }
+    }
+
+    const hasEvent = period?.ID?.toUpperCase().startsWith("DAILY") ? eventYes : false;
+
     const formData = new FormData();
     formData.append("file", file);
     formData.append("period_id", period?.ID);
     formData.append("has_event", hasEvent);
 
-    const now = new Date();
+    const now = getCurrentServerTime();
     const start = new Date(user?.level === "CAPXA" ? period?.XaStartAt : period?.StartAt);
     const end = new Date(user?.level === "CAPXA" ? period?.XaEndAt : period?.EndAt);
 
@@ -8892,20 +9742,21 @@ const UploadReport = ({ period, user }) => {
     try {
       setSending(true);
       setSendMessage("");
-      const token = localStorage.getItem("access_token");
       await axios.post("/report/upload", formData, {
         headers: {
-          "Authorization": `Bearer ${token}`,
           "Content-Type": "multipart/form-data",
         },
       });
+      setEventYes(false);
+      setEventNo(false);
       const sentTime = now.toLocaleString("vi-VN");
       const timeStatusText = getStatusText();
       setSendMessage(`✅ Đã gửi lúc ${sentTime} – Bạn đã gửi ${timeStatusText}`);
       await fetchReportStatus(); // cập nhật trạng thái từ backend
+      if (typeof onAfterSend === "function") onAfterSend();
     } catch (err) {
       if (err.response?.status === 401) {
-        localStorage.removeItem("access_token");
+        localStorage.removeItem("user");
         navigate("/login/branch");
         return;
       }
@@ -8917,12 +9768,12 @@ const UploadReport = ({ period, user }) => {
   };
 
   const onSendClick = () => {
-  if (reportData?.Status === "sent") {
-    setConfirmResend(true);  // hiển thị popup xác nhận
-  } else {
-    handleSend();  // gửi ngay nếu chưa gửi lần nào
-  }
-};
+    if (reportData?.Status === "sent") {
+      setConfirmResend(true);  // hiển thị popup xác nhận
+    } else {
+      handleSend();  // gửi ngay nếu chưa gửi lần nào
+    }
+  };
 
   const formatDuration = (ms) => {
     const totalSeconds = Math.floor(Math.abs(ms) / 1000);
@@ -8944,7 +9795,9 @@ const UploadReport = ({ period, user }) => {
     const endTime = new Date(rawEnd);
 
     const updateTime = () => {
-      const now = new Date();
+      const now = getCurrentServerTime();
+      if (!now) return;
+
       if (now < startTime) {
         setTimeStatus("Chưa đến hạn");
         setTimeLeft(formatDuration(startTime - now));
@@ -8962,6 +9815,13 @@ const UploadReport = ({ period, user }) => {
     return () => clearInterval(interval);
   }, [period, user]);
 
+  useEffect(() => {
+    setSendMessage("");
+    setFile(null);
+    setEventYes(false);
+    setEventNo(false);
+  }, [period?.ID]);
+
   return (
     <div className="bg-white p-6 rounded-xl shadow-md">
       <h2 className="text-lg font-bold text-center text-gray-800 uppercase mb-4">
@@ -8971,7 +9831,7 @@ const UploadReport = ({ period, user }) => {
       <div className="text-sm mb-2">
         <span className="font-semibold">Gửi đến: </span>
         <span className={sendMessage.includes("đúng hạn") ? "text-green-600 font-semibold" : "text-yellow-600 font-semibold"}>
-          Trung tâm thông tin chỉ huy - Phòng Tham mưu - Công an tỉnh Quảng Bình
+          Trung tâm thông tin chỉ huy - Phòng Tham mưu - Công an tỉnh Quảng Trị
         </span>
       </div>
 
@@ -8990,15 +9850,31 @@ const UploadReport = ({ period, user }) => {
       </div>
 
       {period?.ID?.toUpperCase().startsWith("DAILY") && (
-        <div className="flex items-center mb-4">
-          <input
-            type="checkbox"
-            id="hasEvent"
-            className="mr-2"
-            checked={hasEvent}
-            onChange={(e) => setHasEvent(e.target.checked)}
-          />
-          <label htmlFor="hasEvent" className="text-sm">Có tình hình đáng chú ý</label>
+        <div className="flex flex-col mb-4 gap-1">
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              id="hasEventYes"
+              className="mr-2"
+              checked={eventYes}
+              onChange={(e) => setEventYes(e.target.checked)}
+            />
+            <label htmlFor="hasEventYes" className="text-sm">
+              <b>Có</b> tình hình đáng chú ý
+            </label>
+          </div>
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              id="hasEventNo"
+              className="mr-2"
+              checked={eventNo}
+              onChange={(e) => setEventNo(e.target.checked)}
+            />
+            <label htmlFor="hasEventNo" className="text-sm">
+              <b>Không có</b> tình hình đáng chú ý
+            </label>
+          </div>
         </div>
       )}
 
@@ -9006,7 +9882,7 @@ const UploadReport = ({ period, user }) => {
         <span className="font-semibold">Thời gian:</span>{" "}
         <span className={
           timeStatus === "Đúng hạn" ? "text-green-600 font-semibold" :
-          "text-red-600 font-semibold"
+            "text-red-600 font-semibold"
         }>
           {timeStatus}
         </span>{" "}
@@ -9099,85 +9975,104 @@ const UserDashboard = () => {
   const [showAccountInfo, setShowAccountInfo] = useState(false);
 
 
+  //const navigate = useNavigate();
+  //const user = getTokenInfo();
+
+
+  const [user, setUser] = useState(null);
   const navigate = useNavigate();
-  const user = getTokenInfo();
-  useEffect(() => {
-  const updateCountdowns = () => {
-    const updated = {};
-    const now = new Date();
 
-    periods.forEach((p) => {
-      const start = new Date(p.StartAt);
-      const end = new Date(p.EndAt);
-      const diff = Math.abs(now < start ? start - now : now > end ? now - end : end - now);
-      const s = Math.floor(diff / 1000) % 60;
-      const m = Math.floor(diff / 60000) % 60;
-      const h = Math.floor(diff / 3600000) % 24;
-      const d = Math.floor(diff / 86400000);
-      const formatted = `${d}:${h}:${m}:${s}`;
-      const status = now < start
-        ? `   Chưa đến hạn (${formatted})`
-        : now > end
-          ? `   Quá hạn (${formatted})`
-          : `    Đúng hạn (${formatted})`;
-      updated[p.ID] = status;
-    });
+  const [serverTime, setServerTime] = useState(null);
+  const [fetchedAt, setFetchedAt] = useState(null);
 
-    setCountdownMap(updated);
+  const fetchServerTime = async () => {
+    try {
+      const res = await axios.get("/server-time");
+      const serverNow = new Date(res.data.now);
+      setServerTime(serverNow);
+      setFetchedAt(Date.now());
+    } catch (err) {
+      console.error("Không lấy được thời gian server:", err);
+    }
   };
 
-  updateCountdowns();
-  const interval = setInterval(updateCountdowns, 1000);
-  return () => clearInterval(interval);
-}, [periods]);
+  const getCurrentServerTime = () => {
+    if (!serverTime || !fetchedAt) return new Date();
+    const diff = Date.now() - fetchedAt;
+    return new Date(serverTime.getTime() + diff);
+  };
 
   useEffect(() => {
-    if (!user) {
-      navigate("/login/branch");
-    } else {
-      fetchPeriods(user.token);
-    }
+    axios.get("/auth/me", { withCredentials: true })
+      .then(async res => {
+        setUser(res.data);
+        await fetchServerTime();  // gọi server time trước
+        fetchPeriods();
+      })
+      .catch(() => {
+        alert("Phiên đăng nhập hết hạn");
+        navigate("/login/branch");
+      });
   }, []);
 
-  const fetchAllReportStatuses = async (periodList, token) => {
+  useEffect(() => {
+    const updateCountdowns = () => {
+      const updated = {};
+      const now = getCurrentServerTime();
+
+      periods.forEach((p) => {
+        const isXa = user?.level === "CAPXA";
+        const start = new Date(isXa ? p.XaStartAt : p.StartAt);
+        const end = new Date(isXa ? p.XaEndAt : p.EndAt);
+        const diff = Math.abs(now < start ? start - now : now > end ? now - end : end - now);
+        const s = Math.floor(diff / 1000) % 60;
+        const m = Math.floor(diff / 60000) % 60;
+        const h = Math.floor(diff / 3600000) % 24;
+        const d = Math.floor(diff / 86400000);
+        const formatted = `${d}:${h}:${m}:${s}`;
+        const status = now < start
+          ? `   Chưa đến hạn (${formatted})`
+          : now > end
+            ? `   Quá hạn (${formatted})`
+            : `    Đúng hạn (${formatted})`;
+        updated[p.ID] = status;
+      });
+
+      setCountdownMap(updated);
+    };
+
+    updateCountdowns();
+    const interval = setInterval(updateCountdowns, 1000);
+    return () => clearInterval(interval);
+  }, [periods]);
+
+
+  const fetchAllReportStatuses = async (periodList) => {
     const updatedMap = {};
-    console.log("🟢 Fetching report statuses for periods:", periodList);
     for (const p of periodList) {
       try {
-        console.log("📨 Fetching report status for period:", p.ID);
-        const res = await axios.get(`/report/${p.ID}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        console.log("✅ Report status response:", res.data);
+        const res = await axios.get(`/report/${p.ID}`);
         updatedMap[p.ID] = res.data;
       } catch (err) {
-        console.error(`❌ Lỗi khi fetch trạng thái kỳ ${p.ID}:`, err);
         updatedMap[p.ID] = { Status: "not_sent" };
       }
     }
-    setReportStatusMap(updatedMap);
-    console.log("✅ Đã cập nhật reportStatusMap:", updatedMap);
+    return updatedMap;
   };
 
-  const fetchPeriods = async (token) => {
+  const fetchPeriods = async () => {
     try {
-      const res = await getActivePeriods(token);
+      const res = await getActivePeriods();
       setPeriods(res.data);
       console.log("📌 Đã gọi setPeriods với:", res.data);
-      if (res.data.length > 0) setSelectedPeriod(res.data[0]);
+      if (res.data.length > 0) {
+        setSelectedPeriod(res.data[0]);
+        fetchAllReportStatuses(res.data); // ✅ gọi tại đây
+      }
     } catch (err) {
       console.error("Lỗi tải kỳ báo cáo:", err);
     }
   };
-
-  useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    if (periods.length > 0 && token) {
-      console.log("🟡 Gọi fetchAllReportStatuses từ useEffect sau khi setPeriods:", periods);
-      fetchAllReportStatuses(periods, token);
-    }
-  }, [periods]);
-
   return (
     <div className="bg-[#eef4fb] min-h-screen flex flex-col">
       {/* Header */}
@@ -9185,7 +10080,7 @@ const UserDashboard = () => {
         <div className="flex items-center space-x-3">
           <img src={logo} alt="logo" className="w-8 h-8" />
           <h1 className="text-[#0d2d52] font-bold text-lg">
-            Hệ thống báo cáo Công an tỉnh Quảng Bình
+            Hệ thống báo cáo Công an tỉnh Quảng Trị
           </h1>
         </div>
         <div className="flex items-center space-x-4">
@@ -9195,10 +10090,18 @@ const UserDashboard = () => {
             <div className="text-xs">{user?.username}</div>
           </div>
           <DropdownMenu
-            onLogout={() => {
-              localStorage.removeItem("access_token");
-              localStorage.removeItem("remember_branch");
-              navigate("/login/branch");
+            onLogout={async () => {
+              try {
+                await axios.post("/auth/logout", {}, { withCredentials: true });
+              } catch (err) {
+                console.error("Logout error:", err);
+              } finally {
+                // Chuyển hướng sang trang login sau khi xoá cookie
+
+                localStorage.removeItem("remember_branch");
+                localStorage.removeItem("user");
+                navigate("/login/branch");  // hoặc "/login/admin" tuỳ loại tài khoản
+              }
             }}
             onChangePassword={() => {
               setShowChangePassword(true);
@@ -9219,22 +10122,21 @@ const UserDashboard = () => {
         <div className="w-[280px] bg-white p-3 shadow-inner border-r overflow-y-auto">
           {periods.map((p) => (
             <div
-                key={p.ID}
-                onClick={() => {
-                  setSelectedPeriod(p);
-                  setShowHistory(false);  // ✅ Ẩn trang lịch sử nếu đang hiển thị
-                  setShowChangePassword(false);
-                  setShowAccountInfo(false);  // ✅ bổ sung dòng này
-                }}
-              className={`p-3 rounded-lg mb-3 cursor-pointer ${
-                selectedPeriod?.ID === p.ID
-                  ? "bg-blue-100 border border-blue-400"
-                  : "bg-gray-100 hover:bg-gray-200"
-              }`}
+              key={p.ID}
+              onClick={() => {
+                setSelectedPeriod(p);
+                setShowHistory(false);  // ✅ Ẩn trang lịch sử nếu đang hiển thị
+                setShowChangePassword(false);
+                setShowAccountInfo(false);  // ✅ bổ sung dòng này
+              }}
+              className={`p-3 rounded-lg mb-3 cursor-pointer ${selectedPeriod?.ID === p.ID
+                ? "bg-blue-100 border border-blue-400"
+                : "bg-gray-100 hover:bg-gray-200"
+                }`}
             >
               <div className="font-semibold text-blue-800 text-sm">{p.Name}</div>
               <div className="text-xs text-gray-600">
-                🕓{new Date(p.StartAt).toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })} – {new Date(p.EndAt).toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                🕓{new Date(user?.level === "CAPXA" ? p.XaStartAt : p.StartAt).toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })} – {new Date(user?.level === "CAPXA" ? p.XaEndAt : p.EndAt).toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
                 <br />
                 <span className="font-semibold text-xs">
                   {countdownMap[p.ID]}
@@ -9252,25 +10154,25 @@ const UserDashboard = () => {
                         : "text-gray-600 text-xs mt-1 font-medium"
                 }>
                   📤 {
-                        reportStatusMap[p.ID]?.Status === "sent" ? (
-                          <>
-                            Đã gửi lúc {new Date(reportStatusMap[p.ID]?.SentAt).toLocaleString("vi-VN", {
-                              day: "2-digit", month: "2-digit", year: "numeric",
-                              hour: "2-digit", minute: "2-digit", second: "2-digit"
-                            })}
-                            <br />
-                            {
-                              typeof reportStatusMap[p.ID]?.LateSeconds === "number"
-                                ? reportStatusMap[p.ID].LateSeconds === 0
-                                  ? "  Đúng hạn"
-                                  : reportStatusMap[p.ID].LateSeconds < 0
-                                    ? `  Trước hạn ${Math.abs(reportStatusMap[p.ID].LateSeconds)} giây`
-                                    : `  Quá hạn ${reportStatusMap[p.ID].LateSeconds} giây`
-                                : ""
-                            }
-                          </>
-                        ) : "Chưa gửi"
-                      }
+                    reportStatusMap[p.ID]?.Status === "sent" ? (
+                      <>
+                        Đã gửi lúc {new Date(reportStatusMap[p.ID]?.SentAt).toLocaleString("vi-VN", {
+                          day: "2-digit", month: "2-digit", year: "numeric",
+                          hour: "2-digit", minute: "2-digit", second: "2-digit"
+                        })}
+                        <br />
+                        {
+                          typeof reportStatusMap[p.ID]?.LateSeconds === "number"
+                            ? reportStatusMap[p.ID].LateSeconds === 0
+                              ? "  Đúng hạn"
+                              : reportStatusMap[p.ID].LateSeconds < 0
+                                ? `  Trước hạn ${Math.abs(reportStatusMap[p.ID].LateSeconds)} giây`
+                                : `  Quá hạn ${reportStatusMap[p.ID].LateSeconds} giây`
+                            : ""
+                        }
+                      </>
+                    ) : "Chưa gửi"
+                  }
                 </div>
               )}
             </div>
@@ -9289,7 +10191,7 @@ const UserDashboard = () => {
             {user?.name || "Tên đơn vị"}
           </h2>
           {showAccountInfo ? (
-            <AccountInfo token={localStorage.getItem("access_token")} />
+            <AccountInfo />
           ) : showChangePassword ? (
             <ChangePassword />
           ) : showHistory ? (
@@ -9300,6 +10202,12 @@ const UserDashboard = () => {
               reportStatus={reportStatus}
               reportTime={reportTime}
               user={user}
+              serverTime={serverTime}
+              fetchedAt={fetchedAt}
+              onAfterSend={async () => {
+                const updated = await fetchAllReportStatuses(periods);
+                setReportStatusMap(updated);  // ép re-render với object mới
+              }}
             />
           ) : (
             <div className="text-center text-gray-500">Không có kỳ báo cáo nào đang kích hoạt.</div>
@@ -9350,9 +10258,10 @@ const API = window.__ENV__?.VITE_API_BASE_URL || "https://localhost:8000";
 
 const instance = axios.create({
   baseURL: `${API}`, // hoặc URL thật khi deploy
-  headers: {
-    "Content-Type": "application/json",
-  },
+  //headers: {
+  //  "Content-Type": "application/json",
+  //},
+  withCredentials: true,
 });
 
 export default instance;
@@ -9407,19 +10316,14 @@ export const deleteUser = (id, token) =>
 ===== FILE: frontend/src\utils\auth.js =====
 // frontend/src/utils/auth.js
 
-export const getTokenInfo = () => {
-  const token = localStorage.getItem("access_token");
-  const user = localStorage.getItem("user");
+import axios from "../services/api";
 
-  if (!token || !user) return null;
-
+export const getTokenInfo = async () => {
   try {
-    return {
-      token,
-      ...JSON.parse(user),
-    };
+    const res = await axios.get("/auth/me", { withCredentials: true });
+    return res.data;
   } catch (err) {
-    console.error("Invalid user data in localStorage", err);
+    console.error("Token not valid or expired", err);
     return null;
   }
 };

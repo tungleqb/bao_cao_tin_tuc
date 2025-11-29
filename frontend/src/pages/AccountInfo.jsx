@@ -5,24 +5,20 @@ import axios from "../services/api";
 import iconUser from "/icon_user.png";
 import iconInfo from "/icon_info.png";
 
-const AccountInfo = ({ token }) => {
+const AccountInfo = () => {
   const [user, setUser] = useState(null);
 
   useEffect(() => {
     const fetchMe = async () => {
       try {
-        const res = await axios.get("/auth/me", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        const res = await axios.get("/auth/me");
         setUser(res.data);
       } catch (err) {
         console.error("❌ Lỗi khi lấy thông tin tài khoản:", err);
       }
     };
-    if (token) fetchMe();
-  }, [token]);
+    fetchMe();
+  }, []);
 
   if (!user) return <div className="p-4 text-gray-600">Đang tải thông tin...</div>;
 

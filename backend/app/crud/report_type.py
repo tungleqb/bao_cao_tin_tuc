@@ -6,6 +6,8 @@ from ..models.report_type import ReportType
 from ..schemas.report_type import ReportTypeCreate, ReportTypeUpdate
 from datetime import datetime
 from uuid import uuid4
+from ..crud.period_create import create_period_if_needed  # thêm dòng này
+from datetime import datetime, timezone  # sửa nếu chưa có timezone
 
 async def create_report_type(db: AsyncSession, report_type_in: ReportTypeCreate):
     try:
@@ -28,6 +30,11 @@ async def create_report_type(db: AsyncSession, report_type_in: ReportTypeCreate)
         db.add(report_type)
         await db.commit()
         await db.refresh(report_type)
+         # ✅ Sau khi tạo xong → thử tạo kỳ báo cáo nếu đang trong thời gian hợp lệ
+        now = datetime.now(timezone.utc)
+        await create_period_if_needed(db, cap="CAPPHONG", now=now)
+        await create_period_if_needed(db, cap="CAPXA", now=now)
+
         return report_type
     except Exception as e:  
         print(f"❌ Error creating report type: {e}")

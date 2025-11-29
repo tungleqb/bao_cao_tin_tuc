@@ -30,10 +30,8 @@ const AccountManager = () => {
 
   const fetchUsers = async () => {
     try {
-      const token = localStorage.getItem("admin_token");
-      const res = await axios.get("/admin/user", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      //const token = localStorage.getItem("admin_token");
+      const res = await axios.get("/admin/user");
       setUsers(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.error("Failed to fetch users", err);
@@ -48,77 +46,78 @@ const AccountManager = () => {
 
 
   const handleRename = async (user, newName) => {
-  const token = localStorage.getItem("admin_token");
-  try {
-    await axios.put(`/admin/user/${user.id}`, {
-      name: newName,
-      level: user.level,
-      password: user.password || "placeholder",  // hoặc để backend bỏ qua password
-      is_admin: user.is_admin,
-    }, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    fetchUsers();
-    alert("✅ Đổi tên thành công");
-  } catch (err) {
-    alert("❌ Lỗi khi đổi tên: " + err.response?.data?.detail || err.message);
-  }
-};
+    try {
+      await axios.put(`/admin/user/${user.id}`, {
+        name: newName,
+        level: user.level,
+        password: user.password || "placeholder",  // hoặc để backend bỏ qua password
+        is_admin: user.is_admin,
+      });
+      fetchUsers();
+      alert("✅ Đổi tên thành công");
+    } catch (err) {
+      alert("❌ Lỗi khi đổi tên: " + err.response?.data?.detail || err.message);
+    }
+  };
 
   const handleResetPassword = async (user, newPassword) => {
-  const token = localStorage.getItem("admin_token");
-  try {
-    await axios.put(`/admin/user/${user.id}`, {
-      name: user.name,
-      level: user.level,
-      password: newPassword,
-      is_admin: user.is_admin,
-    }, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    alert("✅ Đổi mật khẩu thành công");
-  } catch (err) {
-    alert("❌ Lỗi khi đổi mật khẩu: " + (err.response?.data?.detail || err.message));
-  }
-};
+    try {
+      await axios.put(`/admin/user/${user.id}`, {
+        name: user.name,
+        level: user.level,
+        password: newPassword,
+        is_admin: user.is_admin,
+      });
+      alert("✅ Đổi mật khẩu thành công");
+    } catch (err) {
+      alert("❌ Lỗi khi đổi mật khẩu: " + (err.response?.data?.detail || err.message));
+    }
+  };
   const handleDeleteUser = async (user) => {
-  const token = localStorage.getItem("admin_token");
-  try {
-    await axios.delete(`/admin/user/${user.id}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    fetchUsers();
-    alert("✅ Đã xoá tài khoản");
-  } catch (err) {
-    alert("❌ Lỗi khi xoá: " + (err.response?.data?.detail || err.message));
-  }
-};
+    try {
+      await axios.delete(`/admin/user/${user.id}`);
+      fetchUsers();
+      alert("✅ Đã xoá tài khoản");
+    } catch (err) {
+      alert("❌ Lỗi khi xoá: " + (err.response?.data?.detail || err.message));
+    }
+  };
   const createUser = async (e) => {
-  e.preventDefault();
-  try {
-    const token = localStorage.getItem("admin_token");
-    const res = await axios.post("/admin/user", form, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    alert("✅ Tạo tài khoản thành công");
-    fetchUsers();
-    setForm({
-      username: "",
-      name: "",
-      level: "CAPPHONG",
-      is_admin: false,
-      password: "",
-    });
-  } catch (err) {
-    alert("❌ Lỗi tạo tài khoản: " + (err.response?.data?.detail || err.message));
-  }
-};
+    e.preventDefault();
+    try {
+      const res = await axios.post("/admin/user", form);
+      alert("✅ Tạo tài khoản thành công");
+      fetchUsers();
+      setForm({
+        username: "",
+        name: "",
+        level: "CAPPHONG",
+        is_admin: false,
+        password: "",
+      });
+    } catch (err) {
+      alert("❌ Lỗi tạo tài khoản: " + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleToggleLock = async (user) => {
+    try {
+      await axios.put(`/admin/user/${user.id}`, {
+        is_locked: !user.is_locked,
+        name: user.name,
+        level: user.level,
+        is_admin: user.is_admin,
+      });
+      fetchUsers();
+      alert(`✅ Đã ${user.is_locked ? "Mở khoá" : "Khoá"} tài khoản ${user.username}`);
+    } catch (err) {
+      alert("❌ Lỗi khi cập nhật trạng thái tài khoản: " + (err.response?.data?.detail || err.message));
+    }
+  };
 
 
   const handleAction = async (action, user) => {
     setMenuOpen(null);
-    const token = localStorage.getItem("admin_token");
-
     if (action === "rename") {
       setSelectedUser(user);
       setShowRenameModal(true);
@@ -190,6 +189,7 @@ const AccountManager = () => {
               <th className="border px-2 py-1">Cấp</th>
               <th className="border px-2 py-1">Admin</th>
               <th className="border px-2 py-1">Ngày tạo</th>
+              <th className="border px-2 py-1">Trạng thái</th>
               <th className="border px-2 py-1">Thao tác</th>
             </tr>
             <tr className="text-xs bg-white">
@@ -211,12 +211,25 @@ const AccountManager = () => {
                 <td className="border px-2 py-1">{u.level}</td>
                 <td className="border px-2 py-1">{u.is_admin ? "✔" : ""}</td>
                 <td className="border px-2 py-1">{u.time_created?.slice(0, 10)}</td>
+                <td className="border px-2 py-1">
+                  {u.is_locked ? (
+                    <span className="text-red-600 font-semibold">Đã khoá</span>
+                  ) : (
+                    <span className="text-green-600">Hoạt động</span>
+                  )}
+                </td>
                 <td className="border px-2 py-1 relative" ref={menuOpen === idx ? menuRef : null}>
                   <button onClick={() => setMenuOpen(menuOpen === idx ? null : idx)} className="bg-gray-200 px-2 py-1 rounded">⋮</button>
                   {menuOpen === idx && (
                     <div className="absolute right-0 mt-1 bg-white border rounded shadow z-10">
                       <button onClick={() => handleAction("rename", u)} className="block w-full text-left px-4 py-2 hover:bg-gray-100">Đổi tên</button>
                       <button onClick={() => handleAction("changepass", u)} className="block w-full text-left px-4 py-2 hover:bg-gray-100">Đổi mật khẩu</button>
+                      <button
+                        onClick={() => handleToggleLock(u)}
+                        className="block w-full text-left px-4 py-2 hover:bg-gray-100 text-blue-600"
+                      >
+                        {u.is_locked ? "Mở khoá" : "Khoá"}
+                      </button>
                       <button onClick={() => handleAction("delete", u)} className="block w-full text-left px-4 py-2 text-red-600 hover:bg-gray-100">Xoá</button>
                     </div>
                   )}
@@ -236,26 +249,26 @@ const AccountManager = () => {
         </div>
       </div>
       {showRenameModal && selectedUser && (
-      <RenameModal
-        user={selectedUser}
-        onClose={() => setShowRenameModal(false)}
-        onRename={handleRename}
-      />
-    )}
-    {showResetModal && selectedUser && (
-  <ResetPasswordModal
-    user={selectedUser}
-    onClose={() => setShowResetModal(false)}
-    onReset={handleResetPassword}
-  />
-)}
-{showDeleteModal && selectedUser && (
-  <DeleteUserModal
-    user={selectedUser}
-    onClose={() => setShowDeleteModal(false)}
-    onDelete={handleDeleteUser}
-  />
-)}
+        <RenameModal
+          user={selectedUser}
+          onClose={() => setShowRenameModal(false)}
+          onRename={handleRename}
+        />
+      )}
+      {showResetModal && selectedUser && (
+        <ResetPasswordModal
+          user={selectedUser}
+          onClose={() => setShowResetModal(false)}
+          onReset={handleResetPassword}
+        />
+      )}
+      {showDeleteModal && selectedUser && (
+        <DeleteUserModal
+          user={selectedUser}
+          onClose={() => setShowDeleteModal(false)}
+          onDelete={handleDeleteUser}
+        />
+      )}
     </div>
   );
 };

@@ -9,6 +9,7 @@ from ..models.period import Period
 from ..schemas.report import ReportCreate, ReportUpdate
 from sqlalchemy import func
 from ..models.report import Report
+from ..models.user import User  # đầu file
 
 async def create_report(db: AsyncSession, report_in: ReportCreate):
     # Check if Report ID already exists
@@ -22,6 +23,12 @@ async def create_report(db: AsyncSession, report_in: ReportCreate):
         if not period_check.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="Period ID does not exist")
 
+        # ✅ Check if user is locked
+        user_check = await db.execute(select(User).where(User.id == report_in.SendID))
+        user = user_check.scalar_one_or_none()
+        if not user or user.is_locked:
+            raise HTTPException(status_code=403, detail="Tài khoản đã bị khóa, không thể gửi báo cáo.")
+        
         report = Report(**report_in.model_dump())
         db.add(report)
         await db.commit()
@@ -96,9 +103,11 @@ async def update_period_status(db: AsyncSession, period_id: str, status: str = N
 async def get_report_by_sender_and_period(db: AsyncSession, sender: str, period_id: str):
     try:
         result = await db.execute(
-            select(Report).where(Report.Sender == sender, Report.PeriodID == period_id)
+            select(Report)
+            .where(Report.Sender == sender, Report.PeriodID == period_id)
+            .order_by(Report.SentAt.desc())
         )
-        return result.scalar_one_or_none()
+        return result.scalars().first()
     except Exception as e:  
         print(f"❌ Error fetching report by sender and period: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")

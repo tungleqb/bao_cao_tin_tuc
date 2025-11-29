@@ -1,18 +1,13 @@
 // frontend/src/utils/auth.js
 
-export const getTokenInfo = () => {
-  const token = localStorage.getItem("access_token");
-  const user = localStorage.getItem("user");
+import axios from "../services/api";
 
-  if (!token || !user) return null;
-
+export const getTokenInfo = async () => {
   try {
-    return {
-      token,
-      ...JSON.parse(user),
-    };
+    const res = await axios.get("/auth/me", { withCredentials: true });
+    return res.data;
   } catch (err) {
-    console.error("Invalid user data in localStorage", err);
+    console.error("Token not valid or expired", err);
     return null;
   }
 };

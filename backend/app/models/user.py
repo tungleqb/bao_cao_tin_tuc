@@ -12,3 +12,4 @@ class User(Base):
     avatar = Column(String, nullable=True)
     level = Column(String, nullable=True)
     is_admin = Column(Boolean, default=False)
+    is_locked = Column(Boolean, default=False)

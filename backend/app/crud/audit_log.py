@@ -5,6 +5,7 @@ from ..models.audit_log import AuditLog
 from ..schemas.audit_log import AuditLogCreate
 from sqlalchemy.future import select
 from sqlalchemy import update, delete
+from datetime import datetime, timedelta, timezone
 
 async def create_audit_log(db: AsyncSession, audit_log_in: AuditLogCreate):
     try:
@@ -20,7 +21,10 @@ async def create_audit_log(db: AsyncSession, audit_log_in: AuditLogCreate):
     
 async def get_audit_logs(db: AsyncSession):
     try:
-        result = await db.execute(select(AuditLog))
+        one_week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).replace(tzinfo=None)
+        result = await db.execute(
+            select(AuditLog).where(AuditLog.timestamp >= one_week_ago)
+        )
         return result.scalars().all()
     except Exception as e:
         print(f"❌ Error fetching audit logs: {e}")

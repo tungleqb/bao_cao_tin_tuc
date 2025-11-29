@@ -11,7 +11,7 @@ from .crud.period import get_all_periods, update_period_status
 from .crud.period_create import create_period_if_needed
 
 logger = logging.getLogger("scheduler")
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.ERROR)
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s"))
 logger.addHandler(handler)
@@ -43,24 +43,25 @@ def job_exists(job_id: str):
     return scheduler.get_job(job_id) is not None
 
 async def schedule_existing_periods():
+    logger.info("Bắt đầu schedule_existing_periods")
     try:
         async with async_session() as db:
             now = datetime.now(timezone.utc)
 
-            print("⏳ Gọi create_period_if_needed PHONG")
+            logger.info("⏳ Gọi create_period_if_needed PHONG")
             await create_period_if_needed(db=db, cap="CAPPHONG", now=now)
 
-            print("⏳ Gọi create_period_if_needed XA")
+            logger.info("⏳ Gọi create_period_if_needed XA")
             await create_period_if_needed(db=db, cap="CAPXA", now=now)
 
-            print("⏳ Gọi get_all_periods")
+            logger.info("⏳ Gọi get_all_periods")
             periods = await get_all_periods(db)
 
-            print(f"✅ Số lượng periods: {len(periods)}")
-            print(">>> Dữ liệu periods:", periods)
+            logger.info(f"✅ Số lượng periods: {len(periods)}")
+            logger.info(f">>> Dữ liệu periods: {periods}")
             for p in periods:
-                print("⛳ Period ID:", getattr(p, "ID", p))  # tránh lỗi crash nếu không phải object
-                print(f"📅 Scheduling activate-status-{p.ID} at {p.ActiveAt}")
+                logger.info(f"⛳ Period ID: {getattr(p, 'ID', p)}")  # tránh lỗi crash nếu không phải object
+                logger.info(f"📅 Scheduling activate-status-{p.ID} at {p.ActiveAt}")
                 # Status jobs (CAPPHONG)
                 if p.ActiveAt and p.ActiveAt > now:
                     job_id = f"activate-status-{p.ID}"
@@ -118,9 +119,9 @@ async def schedule_existing_periods():
                             args=[p.ID],
                             id=job_id
                         )
-        print("✅ schedule_existing_periods SUCCESS")
+        logger.info("✅ schedule_existing_periods SUCCESS")
     except Exception as e:
-        print(f"❌ schedule_existing_periods FAILED: {e}")
+        logger.info(f"❌ schedule_existing_periods FAILED: {e}")
 def start_scheduler():
     scheduler.start()
 
@@ -132,7 +133,7 @@ def start_scheduler():
 
     scheduler.add_job(
         schedule_again,
-        trigger=IntervalTrigger(seconds=180),
+        trigger=IntervalTrigger(seconds=30),
         id="period-rescheduler",
         replace_existing=True
     )

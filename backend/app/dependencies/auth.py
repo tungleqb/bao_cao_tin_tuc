@@ -7,15 +7,15 @@ from ..database import get_db
 from ..schemas.user import UserOut
 from ..services.auth import decode_token
 from ..crud.user import get_user
+from fastapi import Request
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/admin/user/login")
+#oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/admin/user/login")
 
-async def get_current_user(token: str = Security(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> UserOut:
+async def get_current_user(request: Request, db: AsyncSession = Depends(get_db)) -> UserOut:
     try:
-        print(f"🧪 TOKEN RECEIVED = {token}")
+        token = request.cookies.get("access_token")
         if not token:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authentication token")
-
         try:
             payload = decode_token(token)
             user_id_raw = payload.get("sub")

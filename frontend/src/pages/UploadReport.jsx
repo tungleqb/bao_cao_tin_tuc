@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "../services/api";
 
-const UploadReport = ({ period, user }) => {
+const UploadReport = ({ period, user, serverTime, fetchedAt, onAfterSend }) => {
   const renderTimeStatusMessage = () => {
     if (!reportData || reportData.Status !== "sent") return "";
     const late = reportData.LateSeconds;
@@ -11,7 +11,6 @@ const UploadReport = ({ period, user }) => {
     return `– Bạn đã gửi quá hạn ${late} giây`;
   };
   const [file, setFile] = useState(null);
-  const [hasEvent, setHasEvent] = useState(false);
   const [timeStatus, setTimeStatus] = useState("");
   const [timeLeft, setTimeLeft] = useState("");
   const [buttonLabel, setButtonLabel] = useState("Gửi");
@@ -20,34 +19,50 @@ const UploadReport = ({ period, user }) => {
   const [reportData, setReportData] = useState(null);
   const [confirmResend, setConfirmResend] = useState(false);
   const [pendingSend, setPendingSend] = useState(false);
+  //const [serverTime, setServerTime] = useState(null);     // server trả về
+  //const [fetchedAt, setFetchedAt] = useState(null);       // thời điểm máy client nhận được
+  const [eventYes, setEventYes] = useState(false);
+  const [eventNo, setEventNo] = useState(false);
 
   const navigate = useNavigate();
 
   const fetchReportStatus = async () => {
     try {
-      const token = localStorage.getItem("access_token");
-      const res = await axios.get(`/report/${period?.ID}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await axios.get(`/report/${period?.ID}`);
       setReportData(res.data);
       setButtonLabel(res.data.Status === "sent" ? "Gửi lại" : "Gửi");
     } catch (err) {
       if (err.response?.status === 401) {
         localStorage.removeItem("access_token");
+        localStorage.removeItem("user");
         navigate("/login/branch");
       }
       console.error("Lỗi khi lấy trạng thái báo cáo:", err);
     }
   };
 
+  const getCurrentServerTime = () => {
+    if (!serverTime || !fetchedAt) return new Date();
+    const diff = Date.now() - fetchedAt; // mili giây trôi qua từ lúc fetch
+    return new Date(serverTime.getTime() + diff);
+  };
+
   const handleSend = async () => {
     if (!file) return alert("Vui lòng chọn file trước khi gửi!");
+    if (period?.ID?.toUpperCase().startsWith("DAILY")) {
+      if ((eventYes && eventNo) || (!eventYes && !eventNo)) {
+        return alert("Vui lòng chọn 1 trong 2: 'Có' hoặc 'Không có tình hình đáng chú ý'.");
+      }
+    }
+
+    const hasEvent = period?.ID?.toUpperCase().startsWith("DAILY") ? eventYes : false;
+
     const formData = new FormData();
     formData.append("file", file);
     formData.append("period_id", period?.ID);
     formData.append("has_event", hasEvent);
 
-    const now = new Date();
+    const now = getCurrentServerTime();
     const start = new Date(user?.level === "CAPXA" ? period?.XaStartAt : period?.StartAt);
     const end = new Date(user?.level === "CAPXA" ? period?.XaEndAt : period?.EndAt);
 
@@ -60,20 +75,21 @@ const UploadReport = ({ period, user }) => {
     try {
       setSending(true);
       setSendMessage("");
-      const token = localStorage.getItem("access_token");
       await axios.post("/report/upload", formData, {
         headers: {
-          "Authorization": `Bearer ${token}`,
           "Content-Type": "multipart/form-data",
         },
       });
+      setEventYes(false);
+      setEventNo(false);
       const sentTime = now.toLocaleString("vi-VN");
       const timeStatusText = getStatusText();
       setSendMessage(`✅ Đã gửi lúc ${sentTime} – Bạn đã gửi ${timeStatusText}`);
       await fetchReportStatus(); // cập nhật trạng thái từ backend
+      if (typeof onAfterSend === "function") onAfterSend();
     } catch (err) {
       if (err.response?.status === 401) {
-        localStorage.removeItem("access_token");
+        localStorage.removeItem("user");
         navigate("/login/branch");
         return;
       }
@@ -85,12 +101,12 @@ const UploadReport = ({ period, user }) => {
   };
 
   const onSendClick = () => {
-  if (reportData?.Status === "sent") {
-    setConfirmResend(true);  // hiển thị popup xác nhận
-  } else {
-    handleSend();  // gửi ngay nếu chưa gửi lần nào
-  }
-};
+    if (reportData?.Status === "sent") {
+      setConfirmResend(true);  // hiển thị popup xác nhận
+    } else {
+      handleSend();  // gửi ngay nếu chưa gửi lần nào
+    }
+  };
 
   const formatDuration = (ms) => {
     const totalSeconds = Math.floor(Math.abs(ms) / 1000);
@@ -112,7 +128,9 @@ const UploadReport = ({ period, user }) => {
     const endTime = new Date(rawEnd);
 
     const updateTime = () => {
-      const now = new Date();
+      const now = getCurrentServerTime();
+      if (!now) return;
+
       if (now < startTime) {
         setTimeStatus("Chưa đến hạn");
         setTimeLeft(formatDuration(startTime - now));
@@ -130,6 +148,13 @@ const UploadReport = ({ period, user }) => {
     return () => clearInterval(interval);
   }, [period, user]);
 
+  useEffect(() => {
+    setSendMessage("");
+    setFile(null);
+    setEventYes(false);
+    setEventNo(false);
+  }, [period?.ID]);
+
   return (
     <div className="bg-white p-6 rounded-xl shadow-md">
       <h2 className="text-lg font-bold text-center text-gray-800 uppercase mb-4">
@@ -139,7 +164,7 @@ const UploadReport = ({ period, user }) => {
       <div className="text-sm mb-2">
         <span className="font-semibold">Gửi đến: </span>
         <span className={sendMessage.includes("đúng hạn") ? "text-green-600 font-semibold" : "text-yellow-600 font-semibold"}>
-          Trung tâm thông tin chỉ huy - Phòng Tham mưu - Công an tỉnh Quảng Bình
+          Trung tâm thông tin chỉ huy - Phòng Tham mưu - Công an tỉnh Quảng Trị
         </span>
       </div>
 
@@ -158,15 +183,31 @@ const UploadReport = ({ period, user }) => {
       </div>
 
       {period?.ID?.toUpperCase().startsWith("DAILY") && (
-        <div className="flex items-center mb-4">
-          <input
-            type="checkbox"
-            id="hasEvent"
-            className="mr-2"
-            checked={hasEvent}
-            onChange={(e) => setHasEvent(e.target.checked)}
-          />
-          <label htmlFor="hasEvent" className="text-sm">Có tình hình đáng chú ý</label>
+        <div className="flex flex-col mb-4 gap-1">
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              id="hasEventYes"
+              className="mr-2"
+              checked={eventYes}
+              onChange={(e) => setEventYes(e.target.checked)}
+            />
+            <label htmlFor="hasEventYes" className="text-sm">
+              <b>Có</b> tình hình đáng chú ý
+            </label>
+          </div>
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              id="hasEventNo"
+              className="mr-2"
+              checked={eventNo}
+              onChange={(e) => setEventNo(e.target.checked)}
+            />
+            <label htmlFor="hasEventNo" className="text-sm">
+              <b>Không có</b> tình hình đáng chú ý
+            </label>
+          </div>
         </div>
       )}
 
@@ -174,7 +215,7 @@ const UploadReport = ({ period, user }) => {
         <span className="font-semibold">Thời gian:</span>{" "}
         <span className={
           timeStatus === "Đúng hạn" ? "text-green-600 font-semibold" :
-          "text-red-600 font-semibold"
+            "text-red-600 font-semibold"
         }>
           {timeStatus}
         </span>{" "}

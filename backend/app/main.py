@@ -1,9 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import admin_user, admin_report_type, period, report, auth, admin_audit_log
-from fastapi.openapi.utils import get_openapi
+from .routers import admin_reporttype, admin_audit_log, admin_period, admin_report, admin_user, period, report, auth, utils
 from .scheduler import start_scheduler
 from contextlib import asynccontextmanager
+import os
+cors_origins = os.getenv("CORS_ALLOW_ORIGINS", "")
+origin_list = [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     start_scheduler()
@@ -14,43 +17,18 @@ app = FastAPI(lifespan=lifespan)
 #app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origin_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
+app.include_router(admin_period.router)
 app.include_router(admin_user.router)
-app.include_router(admin_report_type.router)
+app.include_router(admin_reporttype.router)
 app.include_router(admin_audit_log.router)
+app.include_router(admin_report.router)
 app.include_router(period.router)
 app.include_router(report.router)
 app.include_router(auth.router)
-
-
-# ✅ Custom OpenAPI để Swagger gửi token
-def custom_openapi():
-    if app.openapi_schema:
-        return app.openapi_schema
-    openapi_schema = get_openapi(
-        title="Report System API",
-        version="1.0.0",
-        description="API backend hệ thống báo cáo.",
-        routes=app.routes,
-    )
-    openapi_schema["components"]["securitySchemes"] = {
-        "BearerAuth": {
-            "type": "http",
-            "scheme": "bearer",
-            "bearerFormat": "JWT",
-        }
-    }
-    for path in openapi_schema["paths"].values():
-        for method in path.values():
-            if isinstance(method, dict):  # bảo vệ chống lỗi
-                method["security"] = [{"BearerAuth": []}]  # ✅ Bắt buộc thêm security
-    app.openapi_schema = openapi_schema
-    return app.openapi_schema
-
-app.openapi = custom_openapi
+app.include_router(utils.router)

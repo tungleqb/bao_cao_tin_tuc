@@ -11,7 +11,7 @@ router = APIRouter(
     tags=["Admin-AuditLog"]
 )
 
-@router.get("/", response_model=list[AuditLogOut])
+@router.get("", response_model=list[AuditLogOut])
 async def read_audit_logs(db: AsyncSession = Depends(get_db), user: UserOut = Depends(get_current_admin)):
     logs = None
     try:

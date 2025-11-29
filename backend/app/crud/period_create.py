@@ -10,7 +10,7 @@ from ..utils.period_utils import generate_all_datetimes
 from pathlib import Path
 import os
 
-BASE_REPORT_FOLDER = "..\\uploaded_reports"
+BASE_REPORT_FOLDER = "../uploaded_reports"
 
 async def get_valid_report_types(db: AsyncSession, cap: str, now: datetime):
     try:
@@ -56,10 +56,16 @@ async def create_period_if_needed(db: AsyncSession, cap: str, now: datetime):
 
             folder_path = os.path.join(BASE_REPORT_FOLDER, new_id)
             os.makedirs(folder_path, exist_ok=True)
-
+            pr_name = f"{rt.Name}"
+            if rt.Period_ID == "DAILY":
+                pr_name = f"{rt.Name} - {datetimes['ActiveAt'].strftime('%d/%m/%Y')}"
+            elif rt.Period_ID == "WEEKLY":
+                pr_name = f"{rt.Name} từ {datetimes['FromAt'].strftime('%d/%m/%Y')} đến {datetimes['ToAt'].strftime('%d/%m/%Y')}"
+            elif rt.Period_ID == "MONTHLY":
+                pr_name = f"{rt.Name} - {datetimes['ActiveAt'].strftime('%m/%Y')}"
             period = Period(
                 ID=new_id,
-                Name=f"{rt.Name} - {datetimes['ActiveAt'].strftime('%d/%m/%Y')}",
+                Name=pr_name,
                 TYPE=rt.ID,
                 ActiveAt=datetimes["ActiveAt"],
                 DeactiveAt=datetimes["DeactiveAt"],

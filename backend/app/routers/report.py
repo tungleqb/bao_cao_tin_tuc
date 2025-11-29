@@ -11,7 +11,6 @@ from ..models.report import Report
 from ..schemas.report import ReportCreate, ReportOut, ReportStatus
 from ..schemas.audit_log import AuditLogCreate
 from ..dependencies.auth import get_current_user
-from ..dependencies.auth import get_current_admin
 from ..database import get_db
 import os
 import hashlib
@@ -20,6 +19,7 @@ from datetime import datetime, timezone
 from fastapi.responses import FileResponse
 import zipfile
 import tempfile
+import uuid
 
 router = APIRouter(prefix="/report", tags=["Report"])
 
@@ -102,7 +102,6 @@ async def upload_report(
             late_seconds = 0
 
         # Sinh ID tránh trùng
-        import uuid
         report_id = f"{user.username}_{period_id}_{uuid.uuid4().hex[:8]}"
 
         old_reports = await crud_report.get_all_reports_by_sender_and_period(db, user.username, period_id)
@@ -153,7 +152,6 @@ async def upload_report(
         raise HTTPException(status_code=500, detail="Failed to upload report")
     return report
 
-
 @router.get("/reports", response_model=list[ReportOut])
 async def get_my_reports(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     try:
@@ -191,49 +189,31 @@ async def get_user_report_for_period(
         ID=report.ID
     )
 
-
-@router.get("/admin/{period_id}", response_model=list[ReportOut])
-async def get_reports_by_period(
+@router.get("/download/me/{period_id}")
+async def download_my_report(
     period_id: str,
     db: AsyncSession = Depends(get_db),
-    admin=Depends(get_current_admin)
+    user=Depends(get_current_user)
 ):
     try:
-        from ..crud import report as crud_report
-        reports = await crud_report.get_latest_reports_by_period(db, period_id)
-        return reports
+        # Tìm báo cáo mới nhất của người dùng trong kỳ
+        report = await crud_report.get_report_by_sender_and_period(db, user.username, period_id)
+        if not report:
+            raise HTTPException(status_code=404, detail="Bạn chưa gửi báo cáo trong kỳ này.")
+
+        if not os.path.exists(report.FilePath):
+            raise HTTPException(status_code=404, detail="File báo cáo không còn tồn tại trên hệ thống.")
+        print(report.FilePath)
+        return FileResponse(
+            path=report.FilePath,
+            filename=report.OriFileName,
+            media_type="application/octet-stream"
+        )
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch reports: {str(e)}")
-   
-
-@router.get("/download/{period_id}")
-async def download_period_folder(
-    period_id: str,
-    db: AsyncSession = Depends(get_db),
-    admin=Depends(get_current_admin)  # ✅ Chỉ cho admin
-    ):
-    try:
-        result = await db.execute(select(Period).where(Period.ID == period_id))
-        period = result.scalar_one_or_none()
-        if not period:
-            raise HTTPException(status_code=404, detail="Period not found")
-
-        folder_path = period.FolderPath
-        if not os.path.isdir(folder_path):
-            raise HTTPException(status_code=404, detail="Folder not found")
-
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
-        with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED) as zipf:
-            for root, _, files in os.walk(folder_path):
-                for file in files:
-                    full_path = os.path.join(root, file)
-                    relative_path = os.path.relpath(full_path, folder_path)
-                    zipf.write(full_path, arcname=relative_path)
-
-        zip_filename = f"{period_id}.zip"
-        return FileResponse(tmp.name, filename=zip_filename, media_type="application/zip")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to download folder: {str(e)}")
+        print(f"❌ Lỗi khi tải file cá nhân: {e}")
+        raise HTTPException(status_code=500, detail="Không thể tải file báo cáo.")
 
 
 

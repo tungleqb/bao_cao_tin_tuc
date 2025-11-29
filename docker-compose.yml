@@ -27,6 +27,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://report_user:password@report_db:5432/baocao
       - SECRET_KEY=Tori@@123!!
       - CERT_HOST=100.122.41.24
+      - CORS_ALLOW_ORIGINS=https://10.77.5.13
     depends_on:
       - db
     restart: unless-stopped

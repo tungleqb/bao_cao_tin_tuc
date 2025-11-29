@@ -9,19 +9,23 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     curl \
     unzip \
-	nano \
+    nano \
  && rm -rf /var/lib/apt/lists/*
+# ✅ THAY ĐỔI: dùng /backend thay vì /app
+WORKDIR /backend
 
-WORKDIR /app
-
-COPY requirements.txt /app/requirements.txt
+COPY requirements.txt ./requirements.txt
 RUN pip install --upgrade pip \
  && pip install -r requirements.txt
- 
-COPY . /app
-COPY start.sh /app/start.sh
-RUN chmod +x /app/start.sh
+
+# ✅ copy toàn bộ mã vào /backend
+COPY . .
+
+# ✅ đảm bảo có quyền thực thi
+RUN chmod +x start.sh
 
 EXPOSE 8000
 
-CMD ["/app/start.sh"]
+# ✅ chạy start.sh tại WORKDIR=/backend
+CMD ["./start.sh"]
+

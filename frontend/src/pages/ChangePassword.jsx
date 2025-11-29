@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import axios from '../services/api'; // dùng cấu hình axios có sẵn
 //import api from "../utils/api";
 
@@ -19,17 +19,11 @@ const ChangePassword = () => {
     }
 
     try {
-      const token = localStorage.getItem('access_token');
       const response = await axios.post(
         '/auth/changepassword',
         {
           old_password: oldPassword,
           new_password: newPassword,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
         }
       );
 
@@ -52,11 +46,10 @@ const ChangePassword = () => {
 
       {message && (
         <div
-          className={`mb-4 px-4 py-2 rounded text-sm ${
-            messageType === 'success'
-              ? 'bg-green-100 text-green-700'
-              : 'bg-red-100 text-red-700'
-          }`}
+          className={`mb-4 px-4 py-2 rounded text-sm ${messageType === 'success'
+            ? 'bg-green-100 text-green-700'
+            : 'bg-red-100 text-red-700'
+            }`}
         >
           {message}
         </div>
